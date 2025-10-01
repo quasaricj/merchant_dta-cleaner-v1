@@ -1,0 +1,5 @@
+pandas
+openpyxl
+google-generativeai
+google-api-python-client
+requests

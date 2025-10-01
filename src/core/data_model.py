@@ -1,0 +1,57 @@
+# pylint: disable=too-many-instance-attributes
+"""
+This module defines the core data structures (dataclasses) used throughout the application.
+These structures represent the state of records, configurations, and job settings.
+"""
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Any
+
+@dataclass
+class MerchantRecord:
+    """Represents a single row of merchant data, both input and output."""
+    # Input fields (flexible based on mapping)
+    original_name: str
+    original_address: Optional[str] = None
+    original_city: Optional[str] = None
+    original_country: Optional[str] = None
+    original_state: Optional[str] = None
+
+    # Enriched/Output fields (as per FR4)
+    cleaned_merchant_name: str = ""
+    website: str = ""
+    socials: List[str] = field(default_factory=list)
+    evidence: str = ""
+    evidence_links: List[str] = field(default_factory=list)
+    cost_per_row: float = 0.0
+    logo_filename: str = ""
+    remarks: str = ""
+
+    # Dictionary to preserve all other columns from the original input file
+    other_data: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class ApiConfig:
+    """Stores API keys required for the application."""
+    gemini_api_key: str = ""
+    search_api_key: str = ""
+    places_api_key: Optional[str] = None
+
+@dataclass
+class ColumnMapping:
+    """Defines the mapping from source Excel columns to required data fields."""
+    merchant_name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    state: Optional[str] = None
+
+@dataclass
+class JobSettings:
+    """Contains all settings for a single processing job."""
+    input_filepath: str
+    output_filepath: str
+    column_mapping: ColumnMapping
+    start_row: int
+    end_row: int
+    mode: str  # "Basic" or "Enhanced"
+    budget_per_row: float = 3.0
