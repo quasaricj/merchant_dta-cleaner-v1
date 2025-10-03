@@ -18,6 +18,7 @@ from src.core.config_manager import (save_column_mapping, load_column_mapping,
 class ColumnMapper(tk.Frame):
     """A GUI component for mapping Excel columns to required data fields."""
 
+    BLANK_OPTION = "<Do Not Map>"
     REQUIRED_FIELDS = {
         "merchant_name": "Merchant Name (mandatory)",
         "address": "Address (optional)",
@@ -46,7 +47,7 @@ class ColumnMapper(tk.Frame):
         """
         if not filepath or not os.path.exists(filepath):
             self.disable()
-            self._update_data_preview(pd.DataFrame()) # Clear preview
+            self._update_data_preview(pd.DataFrame())  # Clear preview
             return
 
         try:
@@ -145,17 +146,29 @@ class ColumnMapper(tk.Frame):
 
     def _update_mapping_dropdowns(self):
         """Updates the values in the comboboxes with the file's columns."""
-        for combobox in self.comboboxes.values():
-            combobox["values"] = self.file_columns
+        optional_values = [self.BLANK_OPTION] + self.file_columns
+        mandatory_values = self.file_columns
+
+        for key, combobox in self.comboboxes.items():
+            if key == "merchant_name":
+                combobox["values"] = mandatory_values
+            else:
+                combobox["values"] = optional_values
 
     def _clear_all_mappings(self):
         """Resets all combobox selections."""
-        for var in self.column_vars.values():
-            var.set("")
+        for key, var in self.column_vars.items():
+            if key == "merchant_name":
+                var.set("")
+            else:
+                var.set(self.BLANK_OPTION)
 
     def _on_selection_change(self, *_):
         """Validates selections and notifies the parent of the update."""
-        selections = [var.get() for var in self.column_vars.values() if var.get()]
+        selections = [
+            var.get() for var in self.column_vars.values()
+            if var.get() and var.get() != self.BLANK_OPTION
+        ]
 
         # FR2C: Validate for duplicates and update styling
         style_name = "Duplicate.TCombobox"
@@ -164,11 +177,14 @@ class ColumnMapper(tk.Frame):
 
         for key, cb in self.comboboxes.items():
             value = self.column_vars[key].get()
-            is_duplicate = value and selections.count(value) > 1
+            is_duplicate = value and value != self.BLANK_OPTION and selections.count(value) > 1
             cb.config(style=style_name if is_duplicate else "TCombobox")
 
         # Create ColumnMapping object and notify parent
-        mapping_data = {key: var.get() or None for key, var in self.column_vars.items()}
+        mapping_data = {}
+        for key, var in self.column_vars.items():
+            value = var.get()
+            mapping_data[key] = value if value != self.BLANK_OPTION else None
         current_mapping = ColumnMapping(**mapping_data)
         self.on_mapping_update(current_mapping)
 
@@ -183,7 +199,11 @@ class ColumnMapper(tk.Frame):
         if not preset_name:
             return
 
-        mapping_data = {key: var.get() or None for key, var in self.column_vars.items()}
+        mapping_data = {}
+        for key, var in self.column_vars.items():
+            value = var.get()
+            mapping_data[key] = value if value and value != self.BLANK_OPTION else None
+
         if not mapping_data.get("merchant_name"):
             messagebox.showerror("Cannot Save", "Merchant Name must be mapped before saving.")
             return
@@ -214,11 +234,13 @@ class ColumnMapper(tk.Frame):
 
             if mapping:
                 for key, var in self.column_vars.items():
-                    value = getattr(mapping, key, "")
-                    if value in self.file_columns:
+                    value = getattr(mapping, key, None)
+                    if value and value in self.file_columns:
                         var.set(value)
+                    elif key != "merchant_name":
+                        var.set(self.BLANK_OPTION)
                     else:
-                        var.set("")  # Clear if column doesn't exist in current file
+                        var.set("")  # Clear if column doesn't exist
                 messagebox.showinfo("Success", f"Mapping '{name_without_ext}' loaded.")
             else:
                 messagebox.showerror("Error Loading", "Could not find or parse the mapping file.")

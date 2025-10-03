@@ -184,9 +184,20 @@ class JobManager:
             if not self.processed_records:
                 return
             output_df = pd.DataFrame([asdict(r) for r in self.processed_records])
-        other_data_df = output_df['other_data'].apply(pd.Series)
-        output_df = pd.concat([output_df.drop('other_data', axis=1), other_data_df], axis=1)
-        output_df.to_excel(self.settings.output_filepath, index=False)
+
+        # FR2C: Handle cases where 'other_data' might be empty or all NaNs
+        if 'other_data' in output_df.columns and not output_df['other_data'].empty:
+            other_data_df = output_df['other_data'].apply(pd.Series)
+            # Ensure column names from 'other_data' do not clash with main columns
+            other_data_df.columns = [
+                f"{col}_other" if col in output_df.columns else col
+                for col in other_data_df.columns
+            ]
+            output_df = pd.concat([output_df.drop('other_data', axis=1), other_data_df], axis=1)
+        else:
+            output_df = output_df.drop('other_data', axis=1, errors='ignore')
+
+        output_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
 
     def _cleanup_checkpoint(self):
         """Removes the checkpoint file upon successful completion."""

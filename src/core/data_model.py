@@ -34,7 +34,12 @@ class ApiConfig:
     """Stores API keys required for the application."""
     gemini_api_key: str = ""
     search_api_key: str = ""
+    search_cse_id: str = ""
     places_api_key: Optional[str] = None
+
+    def is_valid(self) -> bool:
+        """Checks if all mandatory API keys are present."""
+        return bool(self.gemini_api_key and self.search_api_key and self.search_cse_id)
 
 @dataclass
 class ColumnMapping:

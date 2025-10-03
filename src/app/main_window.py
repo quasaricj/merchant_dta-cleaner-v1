@@ -24,6 +24,58 @@ from src.core.job_manager import JobManager
 from src.core.config_manager import load_api_config, save_api_config
 
 
+class Tooltip:
+    """Create a tooltip for a given widget."""
+
+    def __init__(self, widget, text='widget info'):
+        self.widget = widget
+        self.text = text
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+        self.widget.bind("<ButtonPress>", self.leave)
+        self.id = None
+        self.tw = None
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(500, self.showtip)
+
+    def unschedule(self):
+        id = self.id
+        self.id = None
+        if id:
+            self.widget.after_cancel(id)
+
+    def showtip(self, event=None):
+        x = y = 0
+        x, y, cx, cy = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        self.tw = tk.Toplevel(self.widget)
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(self.tw, text=self.text, justify='left',
+                       background="#ffffe0", relief='solid', borderwidth=1,
+                       font=("tahoma", "8", "normal"))
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tw
+        self.tw = None
+        if tw:
+            tw.destroy()
+
+    def update_text(self, new_text):
+        self.text = new_text
+
+
 class MainWindow(tk.Tk):
     """The main application window."""
 
@@ -34,7 +86,7 @@ class MainWindow(tk.Tk):
         self.geometry("800x800")
 
         self.job_settings: Optional[JobSettings] = None
-        self.api_config: Optional[ApiConfig] = load_api_config()
+        self.api_config: ApiConfig = load_api_config() or ApiConfig()
         self.job_manager: Optional[JobManager] = None
 
         self.config_frame: ttk.Frame
@@ -45,9 +97,20 @@ class MainWindow(tk.Tk):
         self.cost_label: ttk.Label
         self.start_button: ttk.Button
         self.progress_monitor: ProgressMonitor
+        self.start_button_tooltip: Optional[Tooltip] = None
 
+        self.create_menu()
         self.create_widgets()
         self.check_api_keys()
+
+    def create_menu(self):
+        """Creates the main application menu."""
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+        settings_menu.add_command(label="API Keys", command=self.open_api_key_dialog)
 
     def create_widgets(self):
         """Create and layout the main widgets."""
@@ -101,6 +164,10 @@ class MainWindow(tk.Tk):
         self.start_button = ttk.Button(controls_frame, text="Start Processing",
                                        command=self.start_processing, state="disabled")
         self.start_button.pack(pady=10, ipadx=10, ipady=5)
+        self.start_button_tooltip = Tooltip(
+            self.start_button,
+            "Please select a file and map the Merchant Name column to enable processing."
+        )
 
     def handle_file_selection(self, filepath: str):
         """Callback for when a file is selected."""
@@ -150,21 +217,30 @@ class MainWindow(tk.Tk):
 
     def validate_for_processing(self):
         """Checks if all conditions are met to enable the start button."""
-        if (self.job_settings and self.job_settings.column_mapping and
-                self.job_settings.column_mapping.merchant_name and
-                self.job_settings.column_mapping.merchant_name != "<not_mapped>"):
+        is_ready = (self.job_settings and self.job_settings.column_mapping and
+                    self.job_settings.column_mapping.merchant_name and
+                    self.job_settings.column_mapping.merchant_name != "<not_mapped>")
+
+        if is_ready:
             self.start_button.config(state="normal")
+            if self.start_button_tooltip:
+                self.start_button_tooltip.update_text("Ready to start processing.")
         else:
             self.start_button.config(state="disabled")
+            if self.start_button_tooltip:
+                tooltip_text = "Please select a file and map the 'Merchant Name (mandatory)' column."
+                self.start_button_tooltip.update_text(tooltip_text)
 
     def start_processing(self):
         """Handler for the 'Start Processing' button."""
         if not self.job_settings:
             messagebox.showerror("Error", "Job settings are not configured.")
             return
-        if not self.api_config or not self.api_config.gemini_api_key:
-            messagebox.showerror("API Keys Missing", "Please configure API keys before starting.")
-            self.check_api_keys()
+        if not self.api_config.is_valid():
+            messagebox.showerror("API Keys Missing",
+                                 "Please configure all required API keys via the "
+                                 "Settings > API Keys menu before starting.")
+            self.open_api_key_dialog()
             return
 
         # Show confirmation screen (FR2E)
@@ -279,25 +355,60 @@ class MainWindow(tk.Tk):
 
     def check_api_keys(self):
         """Checks if API keys exist and prompts the user if they don't."""
-        if not self.api_config or not self.api_config.gemini_api_key:
-            messagebox.showinfo("API Key Setup", "Welcome! Please enter your API keys to begin.")
+        if not self.api_config.is_valid():
+            messagebox.showinfo("API Key Setup",
+                                "Welcome! Please enter your API keys to begin.")
             self.open_api_key_dialog()
 
     def open_api_key_dialog(self):
-        """A simple dialog to get API keys."""
-        gemini_key = askstring("API Key", "Enter your Google Gemini API Key:", show='*')
-        search_key = askstring("API Key", "Enter your Google Search API Key:", show='*')
-        places_key = askstring("API Key (Optional)",
-                               "Enter your Google Places API Key (or leave blank):", show='*')
+        """A custom dialog to get all required API keys."""
+        dialog = tk.Toplevel(self)
+        dialog.title("API Key Configuration")
+        dialog.geometry("400x250")
+        dialog.resizable(False, False)
 
-        if gemini_key and search_key:
-            self.api_config = ApiConfig(gemini_key, search_key, places_key or None)
-            save_api_config(self.api_config)
-            messagebox.showinfo("Success", "API keys saved successfully.")
-        else:
-            messagebox.showwarning("Incomplete",
-                                     "Gemini and Search keys are required "
-                                     "to run the application.")
+        tk.Label(dialog, text="Google Gemini API Key:").pack(pady=5)
+        gemini_entry = tk.Entry(dialog, show='*', width=50)
+        gemini_entry.pack()
+        gemini_entry.insert(0, self.api_config.gemini_api_key or "")
+
+        tk.Label(dialog, text="Google Search API Key:").pack(pady=5)
+        search_key_entry = tk.Entry(dialog, show='*', width=50)
+        search_key_entry.pack()
+        search_key_entry.insert(0, self.api_config.search_api_key or "")
+
+        tk.Label(dialog, text="Google Search CSE ID:").pack(pady=5)
+        cse_id_entry = tk.Entry(dialog, show='*', width=50)
+        cse_id_entry.pack()
+        cse_id_entry.insert(0, self.api_config.search_cse_id or "")
+
+        tk.Label(dialog, text="Google Places API Key (Optional):").pack(pady=5)
+        places_entry = tk.Entry(dialog, show='*', width=50)
+        places_entry.pack()
+        places_entry.insert(0, self.api_config.places_api_key or "")
+
+        def save_keys():
+            gemini_key = gemini_entry.get().strip()
+            search_key = search_key_entry.get().strip()
+            cse_id = cse_id_entry.get().strip()
+            places_key = places_entry.get().strip()
+
+            if gemini_key and search_key and cse_id:
+                self.api_config = ApiConfig(gemini_key, search_key, cse_id, places_key or None)
+                save_api_config(self.api_config)
+                messagebox.showinfo("Success", "API keys saved successfully.", parent=dialog)
+                dialog.destroy()
+            else:
+                messagebox.showwarning("Incomplete",
+                                         "Gemini Key, Search Key, and CSE ID are required.",
+                                         parent=dialog)
+
+        save_button = ttk.Button(dialog, text="Save", command=save_keys)
+        save_button.pack(pady=10)
+
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
 
 if __name__ == '__main__':
     app = MainWindow()
