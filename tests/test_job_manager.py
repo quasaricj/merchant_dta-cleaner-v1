@@ -208,6 +208,30 @@ class TestJobManager(unittest.TestCase):
         # Assert that the checkpoint file was NOT cleaned up, so progress is saved
         self.assertTrue(os.path.exists(self.checkpoint_file))
 
+    @patch('src.core.job_manager.GoogleApiClient')
+    @patch('src.core.job_manager.ProcessingEngine')
+    def test_generic_exception_handling(self, MockProcessingEngine, MockGoogleApiClient):
+        """Test that a generic exception during processing is caught and reported."""
+        # Setup mocks to raise a generic error during processing
+        mock_engine_instance = Mock()
+        error_message = "A random backend error occurred"
+        mock_engine_instance.process_record.side_effect = Exception(error_message)
+        MockProcessingEngine.return_value = mock_engine_instance
+
+        # Initialize and run the job manager
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager.start()
+        manager._thread.join(timeout=2)
+
+        # Assert that the completion callback was called with a failure message
+        self.completion_callback.assert_called_once()
+        args, _ = self.completion_callback.call_args
+        self.assertIn("Job Failed", args[0])
+        self.assertIn(error_message, args[0])
+
+        # The output file should not have been written
+        self.assertFalse(os.path.exists(self.test_output_file))
+
 
 if __name__ == '__main__':
     # This test is complex and might be flaky due to threading.

@@ -69,6 +69,9 @@ venv.bak/
 # Checkpoint files
 *.checkpoint.json
 
+# Log files
+*.log
+
 # OS-specific files
 .DS_Store
 Thumbs.db

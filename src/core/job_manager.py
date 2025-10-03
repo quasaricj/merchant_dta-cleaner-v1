@@ -7,6 +7,7 @@ and orchestrates the processing loop.
 import os
 import json
 import time
+import logging
 import threading
 import copy
 from typing import Callable, Optional, List
@@ -40,6 +41,17 @@ class JobManager:
         self.start_from_row = self.settings.start_row
         self.checkpoint_path = f"{self.settings.input_filepath}.checkpoint.json"
 
+        # --- Setup Logger ---
+        self.logger = logging.getLogger(__name__)
+        if not self.logger.handlers:
+            log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            # Use an absolute path for the log file to avoid ambiguity
+            log_file_path = os.path.abspath("job.log")
+            file_handler = logging.FileHandler(log_file_path)
+            file_handler.setFormatter(log_formatter)
+            self.logger.addHandler(file_handler)
+            self.logger.setLevel(logging.INFO)
+
     def start(self):
         """Starts the processing job in a new thread."""
         if self._is_running:
@@ -67,6 +79,7 @@ class JobManager:
         """The main processing loop that runs in the background."""
         total_rows_in_range = 0
         try:
+            self.logger.info(f"Starting job for file: {thread_settings.input_filepath}")
             # 1. Load from checkpoint if it exists
             self.status_callback(0, 0, "Loading checkpoint...")
             self._load_checkpoint()
@@ -115,6 +128,7 @@ class JobManager:
                 if self.processed_records and last_processed_absolute_row > 0:
                     self._save_checkpoint(current_row=last_processed_absolute_row,
                                           settings_to_save=thread_settings)
+                self.logger.info("Job stopped by user.")
                 self.completion_callback("Job Stopped")
             else:
                 # First, save a final checkpoint before attempting to write the file.
@@ -124,9 +138,11 @@ class JobManager:
                                           settings_to_save=thread_settings)
                 self._write_output_file()
                 self._cleanup_checkpoint()
+                self.logger.info("Job completed successfully.")
                 self.completion_callback("Job Completed Successfully")
 
-        except (IOError, ValueError, KeyError) as e:
+        except Exception as e:
+            self.logger.critical(f"An unexpected error occurred in the job thread: {e}", exc_info=True)
             self.completion_callback(f"Job Failed: {e}")
         finally:
             self._is_running = False
