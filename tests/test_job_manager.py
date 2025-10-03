@@ -184,6 +184,30 @@ class TestJobManager(unittest.TestCase):
         self.assertFalse(os.path.exists(self.test_output_file))
         self.assertTrue(os.path.exists(self.checkpoint_file))
 
+    @patch('src.core.job_manager.GoogleApiClient')
+    @patch('src.core.job_manager.ProcessingEngine')
+    @patch('pandas.DataFrame.to_excel', side_effect=PermissionError("Test permission denied"))
+    def test_file_write_error_handling(self, mock_to_excel, MockProcessingEngine, MockGoogleApiClient):
+        """Test that a file write error is caught and reported correctly."""
+        # Setup mocks
+        mock_engine_instance = Mock()
+        mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
+        MockProcessingEngine.return_value = mock_engine_instance
+
+        # Initialize and run the job manager
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager.start()
+        manager._thread.join(timeout=2)
+
+        # Assert that the completion callback was called with a failure message
+        self.completion_callback.assert_called_once()
+        args, _ = self.completion_callback.call_args
+        self.assertIn("Job Failed", args[0])
+        self.assertIn("Could not write to output file", args[0])
+
+        # Assert that the checkpoint file was NOT cleaned up, so progress is saved
+        self.assertTrue(os.path.exists(self.checkpoint_file))
+
 
 if __name__ == '__main__':
     # This test is complex and might be flaky due to threading.

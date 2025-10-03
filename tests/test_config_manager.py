@@ -20,6 +20,7 @@ class TestConfigManager(unittest.TestCase):
         self.test_api_config = ApiConfig(
             gemini_api_key="test_gemini_key",
             search_api_key="test_search_key",
+            search_cse_id="test_cse_id",
             places_api_key="test_places_key"
         )
         self.test_column_mapping = ColumnMapping(
@@ -52,6 +53,7 @@ class TestConfigManager(unittest.TestCase):
         self.assertIsNotNone(loaded_config)
         self.assertEqual(loaded_config.gemini_api_key, self.test_api_config.gemini_api_key)
         self.assertEqual(loaded_config.search_api_key, self.test_api_config.search_api_key)
+        self.assertEqual(loaded_config.search_cse_id, self.test_api_config.search_cse_id)
         self.assertEqual(loaded_config.places_api_key, self.test_api_config.places_api_key)
 
     def test_load_api_config_no_file(self):
@@ -61,7 +63,9 @@ class TestConfigManager(unittest.TestCase):
 
     def test_api_config_optional_places_key(self):
         """Test saving and loading API config with optional Places key."""
-        config_no_places = ApiConfig(gemini_api_key="gemini", search_api_key="search")
+        config_no_places = ApiConfig(gemini_api_key="gemini",
+                                     search_api_key="search",
+                                     search_cse_id="cse")
         save_api_config(config_no_places)
         loaded_config = load_api_config()
         self.assertIsNotNone(loaded_config)

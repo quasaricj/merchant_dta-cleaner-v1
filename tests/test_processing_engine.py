@@ -62,7 +62,7 @@ class TestProcessingEngine(unittest.TestCase):
         self.assertIn("Found via Google Search", processed.evidence)
 
         # Verify cost calculation
-        expected_cost = API_COSTS["gemini_flash"] + (2 * API_COSTS["google_search"])
+        expected_cost = API_COSTS["gemini_flash_per_request"] + (2 * API_COSTS["google_search_per_query"])
         self.assertAlmostEqual(processed.cost_per_row, expected_cost)
 
     def test_enhanced_mode_successful_places_search(self):
@@ -94,7 +94,7 @@ class TestProcessingEngine(unittest.TestCase):
         self.assertIn("Found via Google Places", processed.evidence)
 
         # Verify cost calculation
-        expected_cost = API_COSTS["gemini_flash"] + API_COSTS["google_places"]
+        expected_cost = API_COSTS["gemini_flash_per_request"] + API_COSTS["google_places_find_place"]
         self.assertAlmostEqual(processed.cost_per_row, expected_cost)
 
     def test_enhanced_mode_fallback_to_search(self):
@@ -118,9 +118,9 @@ class TestProcessingEngine(unittest.TestCase):
         self.assertIn("Found via Google Search", processed.evidence)
 
         # Cost should include all attempts
-        expected_cost = API_COSTS["gemini_flash"] + \
-                        (self.mock_api_client.find_place.call_count * API_COSTS["google_places"]) + \
-                        (self.mock_api_client.search_web.call_count * API_COSTS["google_search"])
+        expected_cost = API_COSTS["gemini_flash_per_request"] + \
+                        (self.mock_api_client.find_place.call_count * API_COSTS["google_places_find_place"]) + \
+                        (self.mock_api_client.search_web.call_count * API_COSTS["google_search_per_query"])
         self.assertAlmostEqual(processed.cost_per_row, expected_cost)
 
     def test_no_match_found(self):

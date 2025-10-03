@@ -14,7 +14,8 @@ from dataclasses import asdict, is_dataclass
 
 import pandas as pd
 
-from src.core.data_model import JobSettings, MerchantRecord, ApiConfig, ColumnMapping
+from src.core.data_model import (JobSettings, MerchantRecord, ApiConfig,
+                                  ColumnMapping, OutputColumnConfig)
 from src.core.processing_engine import ProcessingEngine
 from src.services.google_api_client import GoogleApiClient
 
@@ -64,19 +65,24 @@ class JobManager:
 
     def _run(self, thread_settings: JobSettings):
         """The main processing loop that runs in the background."""
+        total_rows_in_range = 0
         try:
             # 1. Load from checkpoint if it exists
+            self.status_callback(0, 0, "Loading checkpoint...")
             self._load_checkpoint()
 
             # 2. Initialize API client and processing engine
+            self.status_callback(0, 0, "Initializing API clients...")
             api_client = GoogleApiClient(self.api_config)
             engine = ProcessingEngine(thread_settings, api_client)
 
             # 3. Read the input file
+            self.status_callback(0, 0, "Reading input file...")
             df = pd.read_excel(thread_settings.input_filepath,
                                header=thread_settings.start_row - 2)
 
             total_rows_in_range = (thread_settings.end_row - self.start_from_row) + 1
+            self.status_callback(0, total_rows_in_range, "Processing...")
 
             # 4. Main processing loop
             last_processed_absolute_row = 0
@@ -111,6 +117,11 @@ class JobManager:
                                           settings_to_save=thread_settings)
                 self.completion_callback("Job Stopped")
             else:
+                # First, save a final checkpoint before attempting to write the file.
+                # This ensures that even if the write fails, no work is lost.
+                if self.processed_records:
+                    self._save_checkpoint(current_row=last_processed_absolute_row,
+                                          settings_to_save=thread_settings)
                 self._write_output_file()
                 self._cleanup_checkpoint()
                 self.completion_callback("Job Completed Successfully")
@@ -164,10 +175,19 @@ class JobManager:
             if not saved_settings_dict or \
                saved_settings_dict.get("input_filepath") != self.settings.input_filepath:
                 return
-            saved_mapping_dict = saved_settings_dict.pop("column_mapping")
+            saved_mapping_dict = saved_settings_dict.pop("column_mapping", {})
             saved_mapping = ColumnMapping(**saved_mapping_dict)
+
+            # Handle nested dataclass for output columns
+            output_columns_data = saved_settings_dict.pop("output_columns", [])
+            output_columns = [OutputColumnConfig(**data) for data in output_columns_data]
+
             with self._lock:
-                self.settings = JobSettings(**saved_settings_dict, column_mapping=saved_mapping)
+                self.settings = JobSettings(
+                    **saved_settings_dict,
+                    column_mapping=saved_mapping,
+                    output_columns=output_columns
+                )
                 self.start_from_row = checkpoint_data.get("last_processed_row",
                                                           self.settings.start_row - 1) + 1
                 self.processed_records = [
@@ -179,14 +199,51 @@ class JobManager:
             self._cleanup_checkpoint()
 
     def _write_output_file(self):
-        """Writes the processed records to the final output Excel file."""
+        """
+        Writes the processed records to the final output Excel file, honoring the
+        output column configuration specified in the job settings.
+        """
         with self._lock:
             if not self.processed_records:
                 return
-            output_df = pd.DataFrame([asdict(r) for r in self.processed_records])
-        other_data_df = output_df['other_data'].apply(pd.Series)
-        output_df = pd.concat([output_df.drop('other_data', axis=1), other_data_df], axis=1)
-        output_df.to_excel(self.settings.output_filepath, index=False)
+            source_df = pd.DataFrame([asdict(r) for r in self.processed_records])
+
+        # First, reconstruct the original data by combining mapped fields and 'other_data'
+        if 'other_data' in source_df.columns and not source_df['other_data'].empty:
+            # Check if there's any actual data in the dicts to avoid creating empty columns
+            if source_df['other_data'].apply(len).sum() > 0:
+                other_data_df = source_df['other_data'].apply(pd.Series)
+                # The original df had the mapped columns, so let's not add them twice.
+                # `other_data` should contain only columns that were NOT mapped.
+                # We start with `other_data_df` which preserves original column order for unmapped cols.
+                final_df = other_data_df
+            else:
+                final_df = pd.DataFrame()
+        else:
+            final_df = pd.DataFrame()
+
+        # Add the original mapped columns back, in a predictable order
+        # We need to rename them back to their original header names from the mapping
+        reverse_mapping = {v: k for k, v in self.settings.column_mapping.__dict__.items() if v}
+        for original_col_name in reverse_mapping:
+            source_field_name = f"original_{reverse_mapping[original_col_name]}"
+            if source_field_name in source_df:
+                final_df[original_col_name] = source_df[source_field_name]
+
+        # Now, add the new/enriched columns based on the user's configuration
+        for col_config in self.settings.output_columns:
+            if col_config.enabled:
+                if col_config.is_custom:
+                    final_df[col_config.output_header] = ""  # Add as a blank column
+                elif col_config.source_field in source_df:
+                    final_df[col_config.output_header] = source_df[col_config.source_field]
+
+        try:
+            final_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
+        except (IOError, PermissionError) as e:
+            # Raise a new exception with a more user-friendly message
+            raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. "
+                          f"Please check file permissions and ensure the path is valid. Original error: {e}")
 
     def _cleanup_checkpoint(self):
         """Removes the checkpoint file upon successful completion."""
