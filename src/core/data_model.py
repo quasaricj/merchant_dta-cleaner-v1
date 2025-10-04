@@ -83,5 +83,6 @@ class JobSettings:
     start_row: int
     end_row: int
     mode: str  # "Basic" or "Enhanced"
+    model_name: Optional[str] = None
     budget_per_row: float = 3.0
     output_columns: List[OutputColumnConfig] = field(default_factory=get_default_output_columns)
