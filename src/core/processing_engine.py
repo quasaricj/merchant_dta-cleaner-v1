@@ -36,7 +36,8 @@ class ProcessingEngine:
                 break
         if not record.website:
             record.remarks += " | No definitive website found after all search steps."
-            record.evidence = "No match found."
+            if not record.evidence:
+                record.evidence = "No match found."
         record.logo_filename = self._generate_logo_filename(record.cleaned_merchant_name)
         return record
 
@@ -66,46 +67,69 @@ class ProcessingEngine:
         return self._perform_basic_search(record, query)
 
     def _perform_basic_search(self, record: MerchantRecord, query: str) -> bool:
-        """Performs a standard web search."""
+        """Performs a web search and uses AI to validate the results."""
         search_results = self.api_client.search_web(query)
         record.cost_per_row += cost_estimator.API_COSTS["google_search_per_query"]
-        if search_results:
-            best_result = self._find_best_match(search_results, record.cleaned_merchant_name)
-            if best_result:
-                record.website = best_result.get("link", "")
-                record.evidence = f"Found via Google Search with query: '{query}'. Title: '{best_result.get('title')}'"
-                record.evidence_links.append(best_result.get("link", ""))
-                if "facebook.com" in record.website or "twitter.com" in record.website:
-                    record.socials.append(record.website)
-                return True
+        if not search_results:
+            return False
+
+        # Use the new AI validation method
+        validated_data = self.api_client.validate_and_enrich_from_search(search_results, record.cleaned_merchant_name)
+        if self.settings.model_name:
+             record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name)
+
+        if validated_data and validated_data.get("official_website"):
+            record.website = validated_data["official_website"]
+            record.socials = validated_data.get("social_media_links", [])
+            record.evidence = validated_data.get("evidence", f"Found via Google Search with query: '{query}'.")
+            # Ensure evidence_links is populated correctly
+            record.evidence_links = [link for link in [record.website] + record.socials if link]
+            return True
+        elif validated_data:
+             # AI decided there was no good match, respect that decision.
+             record.evidence = validated_data.get("evidence", "AI analyzed search results and found no definitive official website.")
+
         return False
 
     def _build_search_queries(self, record: MerchantRecord) -> List[str]:
-        """Constructs the list of search queries based on FR16."""
+        """Constructs a list of search queries based on FR16, ignoring empty fields."""
         name = record.cleaned_merchant_name
-        addr = record.original_address
-        city = record.original_city
-        country = record.original_country
-        queries = [
-            f"{name} {addr} {city} {country}",
-            f"{name} {city} {country}",
-            f"{name} {city}",
-            f"{name} {country}",
-            name,
-            f"{name} {addr}"
+        # Ensure optional fields are strings, but handle None or empty strings gracefully
+        addr = record.original_address or ""
+        city = record.original_city or ""
+        country = record.original_country or ""
+
+        # Build query parts
+        parts = {
+            'name': name,
+            'addr': addr,
+            'city': city,
+            'country': country
+        }
+
+        # Define query structures from FR16
+        query_structures = [
+            ['name', 'addr', 'city', 'country'], # a
+            ['name', 'city', 'country'],         # b
+            ['name', 'city'],                    # c
+            ['name', 'country'],                 # d
+            ['name'],                            # e
+            ['name', 'addr'],                    # f
         ]
-        return [" ".join(q.split()) for q in queries if q and len(q.split()) > 1]
+
+        queries = []
+        for structure in query_structures:
+            # Join parts only if the corresponding value is not empty
+            query_list = [parts[p] for p in structure if parts[p].strip()]
+            if query_list:
+                queries.append(" ".join(query_list))
+
+        # Remove duplicate queries that might result from empty fields
+        return list(dict.fromkeys(queries))
 
     def _is_valid_place_result(self, result: Optional[Dict]) -> bool:
         """Checks if a Places API result is considered a valid match."""
         return bool(result and result.get("status") == "OK" and result.get("results"))
-
-    def _find_best_match(self, results: List[Dict], cleaned_name: str) -> Optional[Dict]:
-        """Finds the best search result based on name matching."""
-        for result in results:
-            if cleaned_name.lower() in result.get("title", "").lower():
-                return result
-        return results[0] if results else None
 
     def _generate_logo_filename(self, cleaned_name: str) -> str:
         """Creates a standardized logo filename."""

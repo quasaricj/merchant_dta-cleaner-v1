@@ -72,15 +72,21 @@ class JobManager:
             engine = ProcessingEngine(thread_settings, api_client)
 
             self.status_callback(0, 0, "Reading input file...")
-            df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl')
+            df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
 
-            # Correctly slice the dataframe based on 1-based UI input
-            start_index = self.start_from_row - 2
-            end_index = thread_settings.end_row - 1
-            df_to_process = df.iloc[start_index:end_index]
+            # Determine the full slice for the entire job based on original settings.
+            # This is crucial for correctly aligning data when writing the output file.
+            full_job_start_index = thread_settings.start_row - 2
+            full_job_end_index = thread_settings.end_row - 1
+            full_original_slice = df.iloc[full_job_start_index:full_job_end_index]
+            total_rows_for_job = len(full_original_slice)
 
-            total_rows_in_range = len(df_to_process)
-            self.status_callback(len(self.processed_records), total_rows_in_range, "Processing...")
+            # Determine the slice for the *current* processing run, which may be a partial
+            # run if resuming from a checkpoint. self.start_from_row is updated by _load_checkpoint.
+            current_run_start_index = self.start_from_row - 2
+            df_to_process = df.iloc[current_run_start_index:full_job_end_index]
+
+            self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
             for i, row in df_to_process.iterrows():
                 if self._is_stopped: break
@@ -94,7 +100,7 @@ class JobManager:
                     self.processed_records.append(processed_record)
 
                 last_processed_absolute_row = i + 2
-                self.status_callback(len(self.processed_records), total_rows_in_range, "Processing...")
+                self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
                 if len(self.processed_records) % 50 == 0:
                     self._save_checkpoint(current_row=last_processed_absolute_row, settings_to_save=thread_settings)
@@ -102,11 +108,11 @@ class JobManager:
             # --- Finalization ---
             if self._is_stopped:
                 if self.processed_records:
-                    self._write_output_file(df_to_process)
+                    self._write_output_file(full_original_slice)
                 self.logger.info("Job stopped by user. Partial results saved.")
                 self.completion_callback("Job Stopped")
             else:
-                self._write_output_file(df_to_process)
+                self._write_output_file(full_original_slice)
                 self._cleanup_checkpoint()
                 self.logger.info("Job completed successfully.")
                 self.completion_callback("Job Completed Successfully")

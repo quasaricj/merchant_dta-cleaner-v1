@@ -25,6 +25,10 @@ class TestProcessingEngine(unittest.TestCase):
         }
         self.mock_api_client.search_web.return_value = None
         self.mock_api_client.find_place.return_value = None
+        # Add a default mock for the new validation method to prevent unexpected failures
+        self.mock_api_client.validate_and_enrich_from_search.return_value = {
+            "official_website": "", "social_media_links": [], "evidence": "Mock: No match"
+        }
 
         self.job_settings = JobSettings(
             input_filepath="dummy.xlsx",
@@ -41,15 +45,21 @@ class TestProcessingEngine(unittest.TestCase):
         engine = ProcessingEngine(self.job_settings, self.mock_api_client)
         successful_search_result = [{"title": "Official Site", "link": "http://testmerchant.com"}]
         self.mock_api_client.search_web.side_effect = [None, successful_search_result]
+
+        successful_validation = {"official_website": "http://testmerchant.com", "social_media_links": [], "evidence": "Mocked success"}
+        self.mock_api_client.validate_and_enrich_from_search.return_value = successful_validation
+
         record = MerchantRecord(original_name="TEST MERCHANT", original_city="Anytown", original_country="USA")
 
         processed = engine.process_record(record)
 
         self.assertEqual(self.mock_api_client.search_web.call_count, 2)
+        self.mock_api_client.validate_and_enrich_from_search.assert_called_once()
         self.assertEqual(processed.website, "http://testmerchant.com")
 
         gemini_cost = CostEstimator.get_model_cost(self.job_settings.model_name)
-        expected_cost = gemini_cost + (2 * API_COSTS["google_search_per_query"])
+        # Cost: 1x name cleaning (AI), 2x search queries, 1x validation (AI)
+        expected_cost = gemini_cost + (2 * API_COSTS["google_search_per_query"]) + gemini_cost
         self.assertAlmostEqual(processed.cost_per_row, expected_cost)
 
     def test_enhanced_mode_successful_places_search(self):
@@ -76,26 +86,38 @@ class TestProcessingEngine(unittest.TestCase):
         engine = ProcessingEngine(self.job_settings, self.mock_api_client)
         self.mock_api_client.find_place.return_value = {"status": "ZERO_RESULTS"}
         self.mock_api_client.search_web.return_value = [{"title": "Fallback", "link": "http://fallback.com"}]
+
+        successful_validation = {"official_website": "http://fallback.com", "social_media_links": [], "evidence": "Mocked fallback success"}
+        self.mock_api_client.validate_and_enrich_from_search.return_value = successful_validation
+
         record = MerchantRecord(original_name="TEST MERCHANT")
 
         processed = engine.process_record(record)
 
         self.assertTrue(self.mock_api_client.find_place.call_count > 0)
         self.assertTrue(self.mock_api_client.search_web.call_count > 0)
+        self.assertTrue(self.mock_api_client.validate_and_enrich_from_search.call_count > 0)
         self.assertEqual(processed.website, "http://fallback.com")
 
         gemini_cost = CostEstimator.get_model_cost(self.job_settings.model_name)
         expected_cost = (gemini_cost +
                          (self.mock_api_client.find_place.call_count * API_COSTS["google_places_find_place"]) +
-                         (self.mock_api_client.search_web.call_count * API_COSTS["google_search_per_query"]))
+                         (self.mock_api_client.search_web.call_count * API_COSTS["google_search_per_query"]) +
+                         (self.mock_api_client.validate_and_enrich_from_search.call_count * gemini_cost))
         self.assertAlmostEqual(processed.cost_per_row, expected_cost)
 
     def test_no_match_found(self):
         """Test the case where no search method finds a result."""
         engine = ProcessingEngine(self.job_settings, self.mock_api_client)
+        # We need search to return *something* to trigger the validation step.
+        self.mock_api_client.search_web.return_value = [{"title": "some irrelevant result", "link": "http://example.com"}]
+        # Ensure the validation method also reports no match
+        self.mock_api_client.validate_and_enrich_from_search.return_value = {
+            "official_website": "", "social_media_links": [], "evidence": "AI confirmed no match."
+        }
         processed = engine.process_record(MerchantRecord(original_name="OBSCURE BIZ"))
         self.assertEqual(processed.website, "")
-        self.assertEqual(processed.evidence, "No match found.")
+        self.assertEqual(processed.evidence, "AI confirmed no match.")
 
     def test_logo_filename_generation(self):
         """Test the logo filename generation logic."""

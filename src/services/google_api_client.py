@@ -115,3 +115,44 @@ class GoogleApiClient:
         except requests.exceptions.RequestException as e:
             print(f"Error during Google Places API call for '{query}': {e}")
             return None
+
+    def validate_and_enrich_from_search(self, search_results: List[Dict], cleaned_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Uses a second AI pass to validate search results and extract the official website and socials.
+        This acts as a critical validation layer.
+        """
+        if not self.gemini_model:
+            raise ConnectionError("Gemini model is not configured.")
+
+        # Create a numbered list of search results for the prompt
+        formatted_results = ""
+        for i, result in enumerate(search_results, 1):
+            formatted_results += f"{i}. Title: {result.get('title', 'N/A')}\\n   Link: {result.get('link', 'N/A')}\\n   Snippet: {result.get('snippet', 'N/A')}\\n"
+
+        prompt = f"""
+        As a data analyst, your task is to identify the official online presence for the business named "{cleaned_name}" from the following Google Search results.
+
+        Search Results:
+        {formatted_results}
+
+        Your instructions are:
+        1.  **Find the Official Website:** Scrutinize the links and titles to find the single, most authoritative official website for the business.
+            - The best link is the root domain (e.g., 'https://www.starbucks.com').
+            - AVOID secondary links like '/careers', '/blog', specific product pages, or news articles.
+            - AVOID links to third-party aggregators (like Yelp, DoorDash) or social media pages in this field.
+        2.  **Find Social Media Links:** From the official website's snippet or other results, identify direct links to the business's social media profiles (e.g., Facebook, Twitter, Instagram).
+        3.  **Handle No Match:** If, after careful analysis, you determine that NONE of the results are the official website for "{cleaned_name}", you MUST return empty strings for all fields.
+
+        Provide the output in a strict JSON format with the following keys:
+        - "official_website": The single, official root URL, or "" if not found.
+        - "social_media_links": A list of direct social media URLs, or an empty list [] if none are found.
+        - "evidence": A brief, one-sentence explanation of your decision. State which search result you chose and why, or explain why no suitable result was found.
+        """
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            # Clean the response to ensure it's valid JSON
+            cleaned_response = response.text.strip().removeprefix("```json").removesuffix("```").strip()
+            return json.loads(cleaned_response)
+        except Exception as e:
+            print(f"Error during AI validation for '{cleaned_name}': {e}")
+            return None
