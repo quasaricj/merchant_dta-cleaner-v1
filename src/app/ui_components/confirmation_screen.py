@@ -35,7 +35,7 @@ class ConfirmationScreen(tk.Toplevel):
         summary_frame.grid_columnconfigure(1, weight=1)
 
         num_rows = (self.settings.end_row - self.settings.start_row) + 1
-        total_cost = CostEstimator.estimate_cost(num_rows, self.settings.mode)
+        total_cost = CostEstimator.estimate_cost(num_rows, self.settings.mode, self.settings.model_name)
 
         summary_data = {
             "Input File": os.path.basename(self.settings.input_filepath),
