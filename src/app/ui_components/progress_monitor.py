@@ -1,136 +1,152 @@
 # pylint: disable=too-many-instance-attributes
 """
 This module contains the ProgressMonitor widget, a reusable Tkinter component
-for displaying job progress and providing user controls like pause, resume, and stop.
+for displaying job progress, providing controls, and showing final results.
 """
+import os
+import sys
+import subprocess
 import tkinter as tk
-from tkinter import ttk
-from typing import Callable
+from tkinter import ttk, messagebox
+from typing import Callable, Optional
 
 class ProgressMonitor(tk.Frame):
-    """A GUI component to display job progress and provide user controls."""
+    """A GUI component to display job progress, provide controls, and show results."""
 
     def __init__(self, parent, pause_callback: Callable, resume_callback: Callable,
-                 stop_callback: Callable, *args, **kwargs):
+                 stop_callback: Callable, diagnose_callback: Callable, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.pause_callback = pause_callback
         self.resume_callback = resume_callback
         self.stop_callback = stop_callback
+        self.diagnose_callback = diagnose_callback
+        self.output_filepath: Optional[str] = None
 
+        # --- Widgets ---
         self.status_label: ttk.Label
         self.progress_bar: ttk.Progressbar
+        self.button_frame: ttk.Frame
         self.pause_button: ttk.Button
         self.resume_button: ttk.Button
         self.stop_button: ttk.Button
+        self.results_frame: ttk.Frame
+        self.file_info_frame: ttk.Frame
+        self.filepath_entry: ttk.Entry
+        self.copy_button: ttk.Button
+        self.open_button: ttk.Button
+        self.diagnose_button: ttk.Button
 
         self._create_widgets()
+        self.reset_to_idle()
 
     def _create_widgets(self):
         """Creates and arranges the widgets."""
         self.grid_columnconfigure(0, weight=1)
 
-        # --- Status Label ---
         self.status_label = ttk.Label(self, text="Status: Idle")
         self.status_label.grid(row=0, column=0, columnspan=3, sticky="w", padx=5, pady=2)
-
-        # --- Progress Bar ---
         self.progress_bar = ttk.Progressbar(self, orient="horizontal", mode="determinate")
         self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
 
-        # --- Control Buttons ---
-        button_frame = ttk.Frame(self)
-        button_frame.grid(row=2, column=0, columnspan=3, pady=5)
-
-        self.pause_button = ttk.Button(button_frame, text="Pause",
-                                       command=self.pause_callback, state="disabled")
+        self.button_frame = ttk.Frame(self)
+        self.button_frame.grid(row=2, column=0, columnspan=3, pady=5)
+        self.pause_button = ttk.Button(self.button_frame, text="Pause", command=self.pause_callback)
         self.pause_button.pack(side="left", padx=5)
-
-        self.resume_button = ttk.Button(button_frame, text="Resume",
-                                        command=self.resume_callback, state="disabled")
+        self.resume_button = ttk.Button(self.button_frame, text="Resume", command=self.resume_callback)
         self.resume_button.pack(side="left", padx=5)
-
-        self.stop_button = ttk.Button(button_frame, text="Stop",
-                                      command=self.stop_callback, state="disabled")
+        self.stop_button = ttk.Button(self.button_frame, text="Stop", command=self.stop_callback)
         self.stop_button.pack(side="left", padx=5)
 
+        self.results_frame = ttk.Frame(self)
+        self.results_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="ew")
+
+        self.file_info_frame = ttk.Frame(self.results_frame)
+        ttk.Label(self.file_info_frame, text="Output File:").pack(side="left", padx=5)
+        self.filepath_entry = ttk.Entry(self.file_info_frame, state="readonly")
+        self.filepath_entry.pack(side="left", fill="x", expand=True, padx=5)
+        self.copy_button = ttk.Button(self.file_info_frame, text="Copy Path", command=self._copy_path)
+        self.copy_button.pack(side="left", padx=5)
+        self.open_button = ttk.Button(self.file_info_frame, text="Open File", command=self._open_file)
+        self.open_button.pack(side="left", padx=5)
+
+        self.diagnose_button = ttk.Button(self.results_frame, text="Diagnose Problem", command=self.diagnose_callback)
+
+        self.results_frame.grid_remove()
+
     def update_progress(self, current_value: int, max_value: int, status_text: str):
-        """Updates the progress bar and status label."""
-        self.progress_bar["maximum"] = max_value
-        self.progress_bar["value"] = current_value
-        self.status_label.config(text=f"Status: {status_text} ({current_value} / {max_value})")
+        if max_value > 0:
+            self.progress_bar["maximum"] = max_value
+            self.progress_bar["value"] = current_value
+            self.status_label.config(text=f"Status: {status_text} ({current_value} / {max_value})")
+        else:
+            self.status_label.config(text=f"Status: {status_text}")
         self.update_idletasks()
 
     def job_started(self):
-        """Configures the UI for a running job."""
+        self.reset_to_idle()
         self.status_label.config(text="Status: Starting...")
         self.pause_button.config(state="normal")
         self.resume_button.config(state="disabled")
         self.stop_button.config(state="normal")
 
     def job_paused(self):
-        """Configures the UI for a paused job."""
         current_text = self.status_label.cget("text")
         self.status_label.config(text=current_text.replace("Processing", "Paused"))
         self.pause_button.config(state="disabled")
         self.resume_button.config(state="normal")
 
     def job_resumed(self):
-        """Configures the UI for a resumed job."""
         self.pause_button.config(state="normal")
         self.resume_button.config(state="disabled")
 
-    def job_finished(self, final_status: str):
-        """Resets the UI to an idle state after job completion or failure."""
+    def show_results(self, final_status: str, output_filepath: Optional[str]):
+        self.button_frame.grid_remove()
+        self.progress_bar.grid_remove()
         self.status_label.config(text=f"Status: {final_status}")
+        self.results_frame.grid()
+
+        self.file_info_frame.pack_forget()
+        self.diagnose_button.pack_forget()
+
+        self.output_filepath = output_filepath
+        if "Failed" in final_status:
+            self.diagnose_button.pack(pady=5)
+        elif self.output_filepath and os.path.exists(self.output_filepath):
+            self.file_info_frame.pack(fill='x', expand=True)
+            self.filepath_entry.config(state="normal")
+            self.filepath_entry.delete(0, tk.END)
+            self.filepath_entry.insert(0, self.output_filepath)
+            self.filepath_entry.config(state="readonly")
+            self.open_button.config(state="normal")
+        else:
+            # This case handles a stopped job that didn't produce a file yet.
+            # Or a successful job where the file somehow doesn't exist.
+            self.diagnose_button.pack(pady=5)
+            self.status_label.config(text=f"Status: {final_status} (No output file generated)")
+
+
+    def reset_to_idle(self):
+        self.status_label.config(text="Status: Idle")
+        self.progress_bar.grid()
         self.progress_bar["value"] = 0
+        self.button_frame.grid()
         self.pause_button.config(state="disabled")
         self.resume_button.config(state="disabled")
         self.stop_button.config(state="disabled")
+        self.results_frame.grid_remove()
+        self.file_info_frame.pack_forget()
+        self.diagnose_button.pack_forget()
 
-if __name__ == '__main__':
-    import time
+    def _copy_path(self):
+        if self.output_filepath: self.clipboard_clear(); self.clipboard_append(self.output_filepath)
 
-    def example_pause_job():
-        """Dummy callback for example usage."""
-        print("Pause button clicked")
-        monitor_frame.job_paused()
-
-    def example_resume_job():
-        """Dummy callback for example usage."""
-        print("Resume button clicked")
-        monitor_frame.job_resumed()
-
-    def example_stop_job():
-        """Dummy callback for example usage."""
-        print("Stop button clicked")
-        monitor_frame.job_finished("Stopped by user")
-
-    def simulate_job():
-        """Simulates a job to demonstrate the progress monitor."""
-        monitor_frame.job_started()
-        max_val = 100
-        for i in range(max_val + 1):
-            if "Stopped" in monitor_frame.status_label.cget("text"):
-                break
-            if "Paused" not in monitor_frame.status_label.cget("text"):
-                monitor_frame.update_progress(i, max_val, "Processing...")
-                app_root.update()
-                time.sleep(0.05)
-            else:
-                app_root.update()
-                time.sleep(0.1)
-        if "Stopped" not in monitor_frame.status_label.cget("text"):
-            monitor_frame.job_finished("Completed")
-
-    app_root = tk.Tk()
-    app_root.title("Progress Monitor Example")
-    app_root.geometry("400x150")
-
-    monitor_frame = ProgressMonitor(app_root, example_pause_job, example_resume_job,
-                                    example_stop_job, padx=10, pady=10)
-    monitor_frame.pack(fill="x", expand=True)
-
-    start_sim_button = ttk.Button(app_root, text="Start Simulation", command=simulate_job)
-    start_sim_button.pack(pady=10)
-
-    app_root.mainloop()
+    def _open_file(self):
+        if not self.output_filepath or not os.path.exists(self.output_filepath):
+            messagebox.showerror("Error", "Output file not found.", parent=self)
+            return
+        try:
+            if sys.platform == "win32": os.startfile(self.output_filepath)
+            elif sys.platform == "darwin": subprocess.run(["open", self.output_filepath], check=True)
+            else: subprocess.run(["xdg-open", self.output_filepath], check=True)
+        except (OSError, subprocess.CalledProcessError) as e:
+            messagebox.showerror("Error Opening File", f"Could not open the file:\n{e}", parent=self)

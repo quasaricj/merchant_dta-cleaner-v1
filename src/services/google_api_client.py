@@ -1,4 +1,4 @@
-# pylint: disable=no-member
+# pylint: disable=no-member,broad-except-clause
 """
 This module provides a client class for interacting with all required Google APIs,
 including Google Gemini for AI-powered cleaning and Google Custom Search for
@@ -9,46 +9,63 @@ import json
 from typing import Optional, List, Dict, Any
 
 import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
 import requests
-from googleapiclient.discovery import build  # type: ignore
-from googleapiclient.errors import HttpError  # type: ignore
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from src.core.data_model import ApiConfig
+
 
 class GoogleApiClient:
     """A client to manage interactions with Google APIs."""
 
-    def __init__(self, api_config: ApiConfig):
+    def __init__(self, api_config: ApiConfig, model_name: Optional[str] = None):
         self.api_config = api_config
         self.gemini_model = None
         self.search_service = None
-        self._configure_clients()
+        self._configure_clients(model_name)
 
-    def _configure_clients(self):
+    def _configure_clients(self, model_name: Optional[str]):
         """Initializes the API clients based on the provided keys."""
-        # Configure Gemini
         if self.api_config.gemini_api_key:
             try:
                 genai.configure(api_key=self.api_config.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            except ValueError as e:
+                if model_name:
+                    self.gemini_model = genai.GenerativeModel(model_name)
+            except Exception as e:
                 print(f"Error configuring Gemini API: {e}")
 
-        # Configure Custom Search
         if self.api_config.search_api_key:
             try:
-                self.search_service = build("customsearch", "v1",
-                                            developerKey=self.api_config.search_api_key)
+                self.search_service = build("customsearch", "v1", developerKey=self.api_config.search_api_key)
             except HttpError as e:
                 print(f"Error configuring Search API: {e}")
 
-    def clean_merchant_name(self, raw_name: str) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def validate_and_list_models(api_key: str) -> Optional[List[str]]:
         """
-        Uses Gemini AI to clean and standardize a merchant name.
-        Returns a dictionary with cleaned name and reasoning.
+        Validates a Gemini API key by listing available 'flash' models.
+        Returns a list of model names on success, None on failure.
         """
-        if not self.gemini_model:
+        try:
+            genai.configure(api_key=api_key)
+            models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
+                    models.append(m.name)
+            return models
+        except (google_exceptions.PermissionDenied, google_exceptions.Unauthenticated, ValueError) as e:
+            print(f"Gemini API Key validation failed: {e}")
             return None
+        except Exception as e:
+            print(f"An unexpected error occurred during model listing: {e}")
+            return None
+
+    def clean_merchant_name(self, raw_name: str) -> Optional[Dict[str, Any]]:
+        """Uses Gemini AI to clean and standardize a merchant name."""
+        if not self.gemini_model:
+            raise ConnectionError("Gemini model is not configured. Check API key and model selection.")
 
         prompt = f"""
         Analyze the following raw merchant transaction string: "{raw_name}"
@@ -63,86 +80,38 @@ class GoogleApiClient:
         """
         try:
             response = self.gemini_model.generate_content(prompt)
-            # Use removeprefix/suffix for cleaner and more correct stripping
-            cleaned_response = response.text.strip()
-            if cleaned_response.startswith("```json"):
-                cleaned_response = cleaned_response.removeprefix("```json")
-            if cleaned_response.endswith("```"):
-                cleaned_response = cleaned_response.removesuffix("```")
+            cleaned_response = response.text.strip().removeprefix("```json").removesuffix("```")
             return json.loads(cleaned_response)
-        except (ValueError, json.JSONDecodeError) as e:
+        except Exception as e:
             print(f"Error during Gemini call for '{raw_name}': {e}")
             return None
 
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
-        """
-        Performs a web search using the Google Custom Search API.
-        Note: A Custom Search Engine ID (cx) is required.
-        """
-        if not self.search_service:
+        """Performs a web search using the Google Custom Search API."""
+        if not self.search_service or not self.api_config.search_cse_id:
             return None
 
-        cx_id = os.environ.get("GOOGLE_CX_ID", "000000000000000000000:00000000000") # Dummy ID
-        if cx_id.startswith("000"):
-            print("Warning: Google Custom Search CX ID is not configured. Search will fail.")
-
         try:
-            res = self.search_service.cse().list(q=query, cx=cx_id, num=num_results).execute()
+            res = self.search_service.cse().list(
+                q=query, cx=self.api_config.search_cse_id, num=num_results
+            ).execute()
             items = res.get('items', [])
-            return [{
-                "title": item.get('title'),
-                "link": item.get('link'),
-                "snippet": item.get('snippet')
-            } for item in items]
+            return [{"title": item.get('title'), "link": item.get('link'), "snippet": item.get('snippet')} for item in items]
         except HttpError as e:
             print(f"Error during Google Search for '{query}': {e}")
             return None
 
     def find_place(self, query: str) -> Optional[Dict[str, Any]]:
-        """
-        Performs a Text Search using the Google Places API.
-        """
+        """Performs a Text Search using the Google Places API."""
         if not self.api_config.places_api_key:
             return None
 
         base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-        params = {
-            "query": query,
-            "key": self.api_config.places_api_key,
-            "fields": "name,website,formatted_address" # Request specific fields
-        }
-
+        params = {"query": query, "key": self.api_config.places_api_key, "fields": "name,website,formatted_address"}
         try:
             response = requests.get(base_url, params=params, timeout=10)
-            response.raise_for_status()  # Raises an HTTPError for bad responses
+            response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             print(f"Error during Google Places API call for '{query}': {e}")
             return None
-
-if __name__ == '__main__':
-    from src.core.config_manager import load_api_config
-
-    api_conf = load_api_config()
-    if not api_conf or not api_conf.gemini_api_key:
-        print("API configuration not found or incomplete. Run main app to configure.")
-    else:
-        client = GoogleApiClient(api_conf)
-
-        # Test Gemini
-        if client.gemini_model:
-            print("Testing Gemini Name Cleaning...")
-            gemini_result = client.clean_merchant_name("AMZ*Amazon Prime amzn.com/bill WA")
-            print(gemini_result)
-
-        # Test Search
-        if client.search_service:
-            print("\nTesting Web Search...")
-            search_res = client.search_web("O'Malley's Tavern")
-            print(search_res)
-
-        # Test Places
-        if client.api_config.places_api_key:
-            print("\nTesting Places API...")
-            place_res = client.find_place("Starbucks near Dublin")
-            print(place_res)
