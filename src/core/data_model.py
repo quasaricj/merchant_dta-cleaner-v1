@@ -34,7 +34,12 @@ class ApiConfig:
     """Stores API keys required for the application."""
     gemini_api_key: str = ""
     search_api_key: str = ""
+    search_cse_id: str = ""
     places_api_key: Optional[str] = None
+
+    def is_valid(self) -> bool:
+        """Checks if all mandatory API keys are present."""
+        return bool(self.gemini_api_key and self.search_api_key and self.search_cse_id)
 
 @dataclass
 class ColumnMapping:
@@ -46,6 +51,30 @@ class ColumnMapping:
     state: Optional[str] = None
 
 @dataclass
+class OutputColumnConfig:
+    """Represents the configuration for a single output column."""
+    source_field: str  # Corresponds to a MerchantRecord attribute
+    output_header: str  # The header text in the output file
+    enabled: bool = True
+    is_custom: bool = False  # True if it's a user-added blank column
+
+
+def get_default_output_columns() -> List[OutputColumnConfig]:
+    """Returns a default list of output column configurations based on FR4."""
+    default_fields = [
+        ("cleaned_merchant_name", "Cleaned Merchant Name"),
+        ("website", "Website"),
+        ("socials", "Social(s)"),
+        ("evidence", "Evidence"),
+        ("evidence_links", "Evidence Links"),
+        ("cost_per_row", "Cost per Row"),
+        ("logo_filename", "Logo Filename"),
+        ("remarks", "Remarks"),
+    ]
+    return [OutputColumnConfig(source_field=sf, output_header=oh) for sf, oh in default_fields]
+
+
+@dataclass
 class JobSettings:
     """Contains all settings for a single processing job."""
     input_filepath: str
@@ -54,4 +83,6 @@ class JobSettings:
     start_row: int
     end_row: int
     mode: str  # "Basic" or "Enhanced"
+    model_name: Optional[str] = None
     budget_per_row: float = 3.0
+    output_columns: List[OutputColumnConfig] = field(default_factory=get_default_output_columns)

@@ -22,6 +22,7 @@ def save_api_config(api_config: ApiConfig):
     encoded_config = {
         "gemini_api_key": base64.b64encode(api_config.gemini_api_key.encode()).decode(),
         "search_api_key": base64.b64encode(api_config.search_api_key.encode()).decode(),
+        "search_cse_id": base64.b64encode(api_config.search_cse_id.encode()).decode(),
         "places_api_key": (
             base64.b64encode(api_config.places_api_key.encode()).decode()
             if api_config.places_api_key else None
@@ -30,6 +31,7 @@ def save_api_config(api_config: ApiConfig):
 
     with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump({"api_keys": encoded_config}, f, indent=4)
+
 
 def load_api_config() -> Optional[ApiConfig]:
     """
@@ -46,17 +48,22 @@ def load_api_config() -> Optional[ApiConfig]:
 
             gemini_key = base64.b64decode(encoded_config.get("gemini_api_key", "")).decode()
             search_key = base64.b64decode(encoded_config.get("search_api_key", "")).decode()
+            search_cse_id = base64.b64decode(encoded_config.get("search_cse_id", "")).decode()
             places_key_encoded = encoded_config.get("places_api_key")
             places_key = (
                 base64.b64decode(places_key_encoded).decode() if places_key_encoded else None
             )
 
+            if not gemini_key or not search_key or not search_cse_id:
+                return None
+
             return ApiConfig(
                 gemini_api_key=gemini_key,
                 search_api_key=search_key,
+                search_cse_id=search_cse_id,
                 places_api_key=places_key,
             )
-    except (json.JSONDecodeError, FileNotFoundError, TypeError):
+    except (json.JSONDecodeError, FileNotFoundError, TypeError, base64.binascii.Error):
         return None
 
 def save_column_mapping(mapping: ColumnMapping, preset_name: str):

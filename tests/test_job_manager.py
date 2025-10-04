@@ -184,6 +184,75 @@ class TestJobManager(unittest.TestCase):
         self.assertFalse(os.path.exists(self.test_output_file))
         self.assertTrue(os.path.exists(self.checkpoint_file))
 
+    @patch('src.core.job_manager.GoogleApiClient')
+    @patch('src.core.job_manager.ProcessingEngine')
+    @patch('pandas.DataFrame.to_excel', side_effect=PermissionError("Test permission denied"))
+    def test_file_write_error_handling(self, mock_to_excel, MockProcessingEngine, MockGoogleApiClient):
+        """Test that a file write error is caught and reported correctly."""
+        # Setup mocks
+        mock_engine_instance = Mock()
+        mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
+        MockProcessingEngine.return_value = mock_engine_instance
+
+        # Initialize and run the job manager
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager.start()
+        manager._thread.join(timeout=2)
+
+        # Assert that the completion callback was called with a failure message
+        self.completion_callback.assert_called_once()
+        args, _ = self.completion_callback.call_args
+        self.assertIn("Job Failed", args[0])
+        self.assertIn("Could not write to output file", args[0])
+
+        # Assert that the checkpoint file was NOT cleaned up, so progress is saved
+        self.assertTrue(os.path.exists(self.checkpoint_file))
+
+    @patch('src.core.job_manager.GoogleApiClient')
+    @patch('src.core.job_manager.ProcessingEngine')
+    def test_generic_exception_handling(self, MockProcessingEngine, MockGoogleApiClient):
+        """Test that a generic exception during processing is caught and reported."""
+        # Setup mocks to raise a generic error during processing
+        mock_engine_instance = Mock()
+        error_message = "A random backend error occurred"
+        mock_engine_instance.process_record.side_effect = Exception(error_message)
+        MockProcessingEngine.return_value = mock_engine_instance
+
+        # Initialize and run the job manager
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager.start()
+        manager._thread.join(timeout=2)
+
+        # Assert that the completion callback was called with a failure message
+        self.completion_callback.assert_called_once()
+        args, _ = self.completion_callback.call_args
+        self.assertIn("Job Failed", args[0])
+        self.assertIn(error_message, args[0])
+
+        # The output file should not have been written
+        self.assertFalse(os.path.exists(self.test_output_file))
+
+    @patch('src.core.job_manager.GoogleApiClient')
+    @patch('src.core.job_manager.ProcessingEngine')
+    def test_model_name_is_passed_to_api_client(self, MockProcessingEngine, MockGoogleApiClient):
+        """Verify that the selected model_name is passed to the GoogleApiClient."""
+        # Setup
+        self.job_settings.model_name = "models/gemini-1.5-flash-test"
+        mock_engine_instance = Mock()
+        mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
+        MockProcessingEngine.return_value = mock_engine_instance
+
+        # Action
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager.start()
+        manager._thread.join(timeout=2)
+
+        # Assertion
+        MockGoogleApiClient.assert_called_once_with(
+            self.api_config,
+            model_name="models/gemini-1.5-flash-test"
+        )
+
 
 if __name__ == '__main__':
     # This test is complex and might be flaky due to threading.

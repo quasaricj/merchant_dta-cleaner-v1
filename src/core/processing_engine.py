@@ -8,13 +8,8 @@ from typing import List, Dict, Optional
 
 from src.core.data_model import MerchantRecord, JobSettings
 from src.services.google_api_client import GoogleApiClient
+from src.core.cost_estimator import API_COSTS, CostEstimator
 
-# Placeholder for actual API costs. These should be configurable.
-API_COSTS = {
-    "gemini_flash": 0.001,  # Example cost per request
-    "google_search": 0.005, # Example cost per 100 queries (so 0.00005 per query)
-    "google_places": 0.017  # Example cost per request
-}
 
 class ProcessingEngine:
     """
@@ -58,7 +53,9 @@ class ProcessingEngine:
     def _clean_name_with_ai(self, record: MerchantRecord):
         """Uses AI to clean the merchant name and updates the record."""
         cleaned_info = self.api_client.clean_merchant_name(record.original_name)
-        record.cost_per_row += API_COSTS["gemini_flash"]
+        # Correctly use the CostEstimator to get the cost for the selected model
+        if self.settings.model_name:
+            record.cost_per_row += CostEstimator.get_model_cost(self.settings.model_name)
 
         if cleaned_info and cleaned_info.get("cleaned_name"):
             record.cleaned_merchant_name = cleaned_info["cleaned_name"]
@@ -71,7 +68,7 @@ class ProcessingEngine:
         """Performs a Places API search with a fallback to web search."""
         # Try Places API first
         place_result = self.api_client.find_place(query)
-        record.cost_per_row += API_COSTS["google_places"]
+        record.cost_per_row += API_COSTS["google_places_find_place"]
         if self._is_valid_place_result(place_result):
             first_result = place_result["results"][0]  # type: ignore
             record.website = first_result.get("website", "")
@@ -87,7 +84,7 @@ class ProcessingEngine:
     def _perform_basic_search(self, record: MerchantRecord, query: str) -> bool:
         """Performs a standard web search."""
         search_results = self.api_client.search_web(query)
-        record.cost_per_row += API_COSTS["google_search"]
+        record.cost_per_row += API_COSTS["google_search_per_query"]
         if search_results:
             best_result = self._find_best_match(search_results, record.cleaned_merchant_name)
             if best_result:
