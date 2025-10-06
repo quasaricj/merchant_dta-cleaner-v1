@@ -90,10 +90,16 @@ class MainWindow(tk.Tk):
     def create_widgets(self):
         root_frame = ttk.Frame(self, padding="10")
         root_frame.pack(fill="both", expand=True)
+
+        # Bottom frame for progress bar and controls
         progress_frame = ttk.LabelFrame(root_frame, text="Job Progress", padding="10")
         progress_frame.pack(side="bottom", fill="x", pady=10)
         self.progress_monitor = ProgressMonitor(progress_frame, self.pause_job, self.resume_job, self.stop_job, self._run_diagnostics)
-        self.progress_monitor.pack(fill='x', expand=True)
+        self.progress_monitor.pack(side="left", fill='x', expand=True)
+        credit_label = ttk.Label(progress_frame, text="made by jeeban", font=("Arial", 8, "italic"), foreground="gray")
+        credit_label.pack(side="right", padx=5, pady=5)
+
+        # Top frame for configuration options, with a scrollbar
         scroll_container = ttk.Frame(root_frame)
         scroll_container.pack(fill="both", expand=True)
         canvas = tk.Canvas(scroll_container)
@@ -105,9 +111,9 @@ class MainWindow(tk.Tk):
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        self._create_config_widgets(self.config_frame)
 
-    def _create_config_widgets(self, parent):
+        # --- Inlined _create_config_widgets ---
+        parent = self.config_frame
         file_selector_frame = ttk.LabelFrame(parent, text="Step 1: Select Input & Output Files", padding="10")
         file_selector_frame.pack(fill="x", pady=5)
         self.file_selector = FileSelector(file_selector_frame, on_file_select=self.handle_file_selection, on_output_select=self.handle_output_file_selection)
@@ -134,15 +140,11 @@ class MainWindow(tk.Tk):
         self.model_selector = ttk.Combobox(controls_frame, state="disabled", values=[])
         self.model_selector.grid(row=1, column=1, sticky='ew', padx=5)
         self.model_selector.bind("<<ComboboxSelected>>", self._on_model_select)
-        self.cost_label = ttk.Label(controls_frame, text="Estimated Cost: ₹0.00", font=("Arial", 10, "italic"))
+        self.cost_label = ttk.Label(controls_frame, text="Estimated Cost: $0.00", font=("Arial", 10, "italic"))
         self.cost_label.grid(row=2, column=0, columnspan=2, pady=5)
         self.start_button = ttk.Button(controls_frame, text="Start Processing", command=self.start_processing, state="disabled")
         self.start_button.grid(row=3, column=0, columnspan=2, pady=10, ipadx=10, ipady=5)
         self.start_button_tooltip = Tooltip(self.start_button, "Please configure API keys and select a file to enable.")
-
-        # Add the "made by jeeban" credit label
-        credit_label = ttk.Label(progress_frame, text="made by jeeban", font=("Arial", 8, "italic"), foreground="gray")
-        credit_label.pack(side="right", padx=5, pady=5)
 
     def _on_model_select(self, event=None):
         if self.job_settings: self.job_settings.model_name = self.model_selector.get().split(" ")[0]
