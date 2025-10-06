@@ -1,3 +1,6 @@
-2025-10-04 15:02:28,705 - src.core.job_manager - INFO - Starting job for file: srs_compliance_test_data.xlsx
-2025-10-04 15:04:24,179 - src.core.job_manager - INFO - Successfully wrote output to live_test_output.xlsx
-2025-10-04 15:04:24,179 - src.core.job_manager - INFO - Job completed successfully.
+2025-10-06 19:11:26,510 - src.core.job_manager - INFO - Starting job for file: for_test.xlsx
+2025-10-06 19:11:55,439 - src.core.job_manager - INFO - Successfully wrote output to live_test_output.xlsx
+2025-10-06 19:11:55,440 - src.core.job_manager - INFO - Job completed successfully.
+2025-10-06 19:33:14,743 - src.core.job_manager - INFO - Starting job for file: for_test.xlsx
+2025-10-06 19:33:48,160 - src.core.job_manager - INFO - Successfully wrote output to live_test_output.xlsx
+2025-10-06 19:33:48,161 - src.core.job_manager - INFO - Job completed successfully.
