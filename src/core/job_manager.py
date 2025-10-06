@@ -72,19 +72,18 @@ class JobManager:
             engine = ProcessingEngine(thread_settings, api_client)
 
             self.status_callback(0, 0, "Reading input file...")
-            df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
+            # Load the entire original dataframe to ensure all rows are preserved
+            original_df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
 
-            # Determine the full slice for the entire job based on original settings.
-            # This is crucial for correctly aligning data when writing the output file.
-            full_job_start_index = thread_settings.start_row - 2
-            full_job_end_index = thread_settings.end_row - 1
-            full_original_slice = df.iloc[full_job_start_index:full_job_end_index]
-            total_rows_for_job = len(full_original_slice)
+            # Determine the slice for the rows that need to be processed
+            start_index = thread_settings.start_row - 2
+            # The end index is the excel row number minus 2 (for header and 0-based index)
+            end_index = thread_settings.end_row - 2
+            total_rows_for_job = (end_index - start_index) + 1
 
-            # Determine the slice for the *current* processing run, which may be a partial
-            # run if resuming from a checkpoint. self.start_from_row is updated by _load_checkpoint.
+            # Determine the slice for the *current* processing run, which may be partial
             current_run_start_index = self.start_from_row - 2
-            df_to_process = df.iloc[current_run_start_index:full_job_end_index]
+            df_to_process = original_df.iloc[current_run_start_index:end_index + 1]
 
             self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
@@ -108,11 +107,11 @@ class JobManager:
             # --- Finalization ---
             if self._is_stopped:
                 if self.processed_records:
-                    self._write_output_file(full_original_slice)
+                    self._write_output_file(original_df) # Pass the full original DataFrame
                 self.logger.info("Job stopped by user. Partial results saved.")
                 self.completion_callback("Job Stopped")
             else:
-                self._write_output_file(full_original_slice)
+                self._write_output_file(original_df) # Pass the full original DataFrame
                 self._cleanup_checkpoint()
                 self.logger.info("Job completed successfully.")
                 self.completion_callback("Job Completed Successfully")
@@ -173,46 +172,57 @@ class JobManager:
             self.logger.error(f"Could not load checkpoint file. Starting from scratch. Error: {e}")
             self._cleanup_checkpoint()
 
-    def _write_output_file(self, original_data_df: pd.DataFrame):
+    def _write_output_file(self, original_df: pd.DataFrame):
         """
-        Writes the final results to an Excel file by combining the original data
-        with the new, processed data.
+        Writes the final results to an Excel file by merging the processed data
+        back into the original full DataFrame, preserving all rows.
         """
         with self._lock:
             if not self.processed_records:
                 self.logger.warning("No records were processed, output file will not be written.")
+                # Still write the original data back if the user expects an output file
+                try:
+                    original_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
+                    self.logger.info(f"Wrote original data to {self.settings.output_filepath} as no rows were processed.")
+                except (IOError, PermissionError) as e:
+                     raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Error: {e}")
                 return
 
-            # Make a copy to avoid SettingWithCopyWarning
-            final_df = original_data_df.copy()
+            # This is the full, original dataframe. We will update it in-place.
+            final_df = original_df.copy()
 
-            # Convert the list of processed record objects into a DataFrame
+            # Convert processed records to a DataFrame
             processed_df = pd.DataFrame([asdict(r) for r in self.processed_records])
 
-            # Reset index on both DataFrames to ensure alignment when adding columns
-            final_df.reset_index(drop=True, inplace=True)
-            processed_df.reset_index(drop=True, inplace=True)
+            # The starting index for merging is the start row of the *entire* job, minus 2
+            # (1 for header, 1 for 0-based index)
+            start_index = self.settings.start_row - 2
 
-        # Iterate through the user-defined output columns and add them to the final DataFrame
-        for col_config in self.settings.output_columns:
-            if col_config.enabled:
-                if col_config.is_custom:
-                    # Add a blank column if it's a custom user-defined one
-                    final_df[col_config.output_header] = ""
-                elif hasattr(processed_df, col_config.source_field):
-                    # Check if the source field exists in the processed data
-                    if col_config.source_field in processed_df.columns:
-                        final_df[col_config.output_header] = processed_df[col_config.source_field]
-                    else:
-                        # If the source field is valid but missing (e.g., optional field), add a blank column
-                        final_df[col_config.output_header] = ""
+            # Add new columns to the final DataFrame before populating them
+            for col_config in self.settings.output_columns:
+                if col_config.enabled and col_config.output_header not in final_df.columns:
+                    final_df[col_config.output_header] = pd.NA
+
+            # Update the rows in the final DataFrame with the processed data
+            for i, processed_row in processed_df.iterrows():
+                # The target index in the original DataFrame
+                target_idx = start_index + i
+                if target_idx >= len(final_df):
+                    continue # Should not happen, but a safeguard
+
+                for col_config in self.settings.output_columns:
+                    if col_config.enabled:
+                        source_value = getattr(processed_row, col_config.source_field, pd.NA)
+                        # Ensure lists (like socials) are converted to a string representation
+                        if isinstance(source_value, list):
+                            source_value = ', '.join(filter(None, source_value))
+                        final_df.loc[target_idx, col_config.output_header] = source_value
 
         try:
-            # Save the combined DataFrame to the output file
+            # Save the merged DataFrame, which now contains all original rows
             final_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
             self.logger.info(f"Successfully wrote output to {self.settings.output_filepath}")
         except (IOError, PermissionError) as e:
-            # Raise a specific, informative error if the file can't be written
             raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Check permissions. Original error: {e}")
 
     def _cleanup_checkpoint(self):

@@ -28,7 +28,7 @@ class TestJobManager(unittest.TestCase):
             output_filepath=self.test_output_file,
             column_mapping=self.column_mapping,
             start_row=2,
-            end_row=12, # Process all 10 rows of data (2-11)
+            end_row=11, # Process all 10 rows of data (2-11)
             mode="Basic",
             model_name="models/gemini-test"
         )
