@@ -63,24 +63,36 @@ class GoogleApiClient:
             return None
 
     def clean_merchant_name(self, raw_name: str) -> Optional[Dict[str, Any]]:
-        """Uses Gemini AI to clean and standardize a merchant name."""
+        """Uses a hybrid of regex and AI to clean and standardize a merchant name."""
+        import re
         if not self.gemini_model:
             raise ConnectionError("Gemini model is not configured. Check API key and model selection.")
+        if not raw_name or not raw_name.strip():
+            return {"cleaned_name": "", "reasoning": "Input was empty."}
 
+        # Step 1: Deterministic cleaning with Python's regex
+        # Remove leading numbers, special characters (*, @), and spaces.
+        pre_processed_name = re.sub(r'^[0-9\s*@]+', '', raw_name).strip()
+
+        # Step 2: Use a more focused AI prompt on the pre-processed string.
         prompt = f"""
-        Analyze the following raw merchant transaction string: "{raw_name}"
-        Your task is to extract the official, clean, and recognizable business name.
-        - If it's a franchise, return the main brand name (e.g., "McDonald's").
-        - If it includes a location, remove it (e.g., "Starbucks 5th Ave" -> "Starbucks").
-        - If it's a generic descriptor, identify it as such (e.g., "Parking Garage").
+        From the merchant string "{pre_processed_name}", extract only the core business name.
+        - Ignore location indicators like "COLON ROPA", "TOLUCA", "GUAD 1", "DE JULIO".
+        - Extract the primary brand name.
 
-        Provide the output in a JSON format with two keys:
-        1. "cleaned_name": The official business name.
-        2. "reasoning": A brief explanation of how you arrived at the name.
+        Examples:
+        - Input: "FAMSA COLON ROPA" -> Output: {{"cleaned_name": "FAMSA", "reasoning": "Extracted brand name 'FAMSA' and ignored location."}}
+        - Input: "MPROMODA TOLUCA" -> Output: {{"cleaned_name": "MPROMODA", "reasoning": "Extracted brand name 'MPROMODA'."}}
+        - Input: "OPENPAY ANGELDELCIE" -> Output: {{"cleaned_name": "OPENPAY", "reasoning": "Extracted payment processor 'OPENPAY'."}}
+        - Input: "PLAZA MAYOR" -> Output: {{"cleaned_name": "PLAZA MAYOR", "reasoning": "Identified as a business name."}}
+        - Input: "FOTOSDERUNNERGDL" -> Output: {{"cleaned_name": "FOTOSDERUNNERGDL", "reasoning": "Treated as a single business name."}}
+        - Input: "LITTLE 8 DE JULIO" -> Output: {{"cleaned_name": "LITTLE", "reasoning": "Extracted brand 'LITTLE' and ignored location '8 DE JULIO'."}}
+
+        Provide the output in a strict JSON format with two keys: "cleaned_name" and "reasoning".
         """
         try:
             response = self.gemini_model.generate_content(prompt)
-            cleaned_response = response.text.strip().removeprefix("```json").removesuffix("```")
+            cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
             return json.loads(cleaned_response)
         except Exception as e:
             print(f"Error during Gemini call for '{raw_name}': {e}")

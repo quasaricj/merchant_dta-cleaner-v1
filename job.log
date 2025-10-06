@@ -1,0 +1,3 @@
+2025-10-06 10:27:26,511 - src.core.job_manager - INFO - Starting job for file: for_test.xlsx
+2025-10-06 10:28:21,953 - src.core.job_manager - INFO - Successfully wrote output to live_test_output.xlsx
+2025-10-06 10:28:21,953 - src.core.job_manager - INFO - Job completed successfully.
