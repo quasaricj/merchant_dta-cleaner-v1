@@ -15,7 +15,7 @@ API_KEY_GEMINI = "AIzaSyAKhZMr8YSrLMA9ibvQKvKnnskefAHPDKA"
 API_KEY_SEARCH = "AIzaSyB5kDmEk0lze4iZZgI3KPKBNmu-id6ivfA"
 CSE_ID = "b54a78356ae6441e9"
 
-INPUT_FILE = "srs_compliance_test_data.xlsx"
+INPUT_FILE = "for_test.xlsx"
 OUTPUT_FILE = "live_test_output.xlsx"
 
 # This event will signal when the job is complete
@@ -37,10 +37,10 @@ def run_live_test():
 
     # 2. Configure Column Mapping
     column_mapping = ColumnMapping(
-        merchant_name="Merchant Name",
-        address="Address",
-        city="City",
-        country="Country"
+        merchant_name="CLEANSED_MERCHANT_NAME",
+        address="CLEANSED_MERCHANT_STREET_ADDR",
+        city="CLEANSED_CITY_NAME",
+        country="CLEANSED_COUNTRY_CODE"
     )
 
     # 3. Configure Job Settings
@@ -51,7 +51,7 @@ def run_live_test():
         start_row=2,
         end_row=12,
         mode="Basic",
-        model_name="models/gemini-flash-latest",
+        model_name="models/gemini-2.0-flash",
         output_columns=get_default_output_columns()
     )
 

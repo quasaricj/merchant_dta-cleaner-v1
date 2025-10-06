@@ -78,3 +78,9 @@ class FileSelector(tk.Frame):
     def set_output_path(self, path: str):
         """Allows the main window to set the output path externally if needed."""
         self.output_filepath.set(path)
+
+    def toggle_controls(self, enabled: bool):
+        """Disables or enables the browse buttons."""
+        state = "normal" if enabled else "disabled"
+        self.browse_button.config(state=state)
+        self.output_browse_button.config(state=state)

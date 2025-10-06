@@ -52,15 +52,19 @@ class ModeSelector(tk.Frame):
         """Returns the currently selected mode."""
         return self.mode_var.get()
 
+    def toggle_controls(self, enabled: bool):
+        """Disables or enables the radio buttons."""
+        state = "normal" if enabled else "disabled"
+        self.basic_button.config(state=state)
+        self.enhanced_button.config(state=state)
+
     def enable(self):
-        """Enables the radio buttons."""
-        self.basic_button.config(state="normal")
-        self.enhanced_button.config(state="normal")
+        """Redirects to the new toggle method for backward compatibility."""
+        self.toggle_controls(True)
 
     def disable(self):
-        """Disables the radio buttons."""
-        self.basic_button.config(state="disabled")
-        self.enhanced_button.config(state="disabled")
+        """Redirects to the new toggle method for backward compatibility."""
+        self.toggle_controls(False)
 
 if __name__ == '__main__':
     def handle_mode_change(mode):

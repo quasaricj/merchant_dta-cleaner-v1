@@ -4,11 +4,12 @@ from src.core.cost_estimator import CostEstimator, API_COSTS
 class TestCostEstimator(unittest.TestCase):
 
     def test_estimate_cost_basic_mode(self):
-        """Test cost estimation for the Basic processing mode."""
+        """Test cost estimation for the Basic processing mode using the 'max expected' model."""
         num_rows = 100
-        model_name = "models/gemini-2.0-flash"  # A sample model name
+        model_name = "models/gemini-2.0-flash"
         gemini_cost = CostEstimator.get_model_cost(model_name)
-        expected_cost_per_row = gemini_cost + API_COSTS['google_search_per_query']
+        # New model: 2 AI calls + 4 search queries
+        expected_cost_per_row = (2 * gemini_cost) + (4 * API_COSTS['google_search_per_query'])
         expected_total_cost = num_rows * expected_cost_per_row
         self.assertAlmostEqual(
             CostEstimator.estimate_cost(num_rows, "Basic", model_name),
@@ -16,14 +17,15 @@ class TestCostEstimator(unittest.TestCase):
         )
 
     def test_estimate_cost_enhanced_mode(self):
-        """Test cost estimation for the Enhanced processing mode."""
+        """Test cost estimation for the Enhanced processing mode using the 'max expected' model."""
         num_rows = 100
-        model_name = "models/gemini-2.0-flash"  # A sample model name
+        model_name = "models/gemini-2.0-flash"
         gemini_cost = CostEstimator.get_model_cost(model_name)
+        # New model: 2 AI calls + 4 search queries + 4 places queries
         expected_cost_per_row = (
-            gemini_cost +
-            API_COSTS['google_search_per_query'] +
-            API_COSTS['google_places_find_place']
+            (2 * gemini_cost) +
+            (4 * API_COSTS['google_search_per_query']) +
+            (4 * API_COSTS['google_places_find_place'])
         )
         expected_total_cost = num_rows * expected_cost_per_row
         self.assertAlmostEqual(
