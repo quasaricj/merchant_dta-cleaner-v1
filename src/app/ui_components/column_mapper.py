@@ -38,7 +38,7 @@ class ColumnMapper(tk.Frame):
         self.load_button: ttk.Button
 
         self._create_widgets()
-        self.disable()
+        self.toggle_controls(False)
 
     def load_file(self, filepath: str):
         """
@@ -46,38 +46,40 @@ class ColumnMapper(tk.Frame):
         Disables the component if the file is invalid or cannot be read.
         """
         if not filepath or not os.path.exists(filepath):
-            self.disable()
+            self.toggle_controls(False)
             self._update_data_preview(pd.DataFrame())
             return
 
         try:
-            df_preview = pd.read_excel(filepath, nrows=10)
+            df_preview = pd.read_excel(filepath, nrows=10, engine='openpyxl')
             self.file_columns = sorted(list(df_preview.columns))
             self._update_data_preview(df_preview)
             self._clear_all_mappings()
             self._update_dropdown_options() # Set initial dropdown values
-            self.enable()
-
+            self.toggle_controls(True)
+            return self.file_columns
         except (pd.errors.EmptyDataError, FileNotFoundError, ValueError) as e:
             messagebox.showerror("Error Reading File", f"Could not read the Excel file.\nError: {e}")
             self.file_columns = []
             self._update_data_preview(pd.DataFrame())
             self._update_dropdown_options()
-            self.disable()
+            self.toggle_controls(False)
+        return []
 
-    def enable(self):
-        """Enable all interactive widgets."""
-        for cb in self.comboboxes.values():
-            cb.config(state="readonly")
-        if hasattr(self, 'save_button'): self.save_button.config(state="normal")
-        if hasattr(self, 'load_button'): self.load_button.config(state="normal")
-
-    def disable(self):
-        """Disable all interactive widgets."""
-        for cb in self.comboboxes.values():
-            cb.config(state="disabled")
-        if hasattr(self, 'save_button'): self.save_button.config(state="disabled")
-        if hasattr(self, 'load_button'): self.load_button.config(state="disabled")
+    def toggle_controls(self, enabled: bool):
+        """Disables or enables all interactive widgets in the mapper."""
+        if enabled:
+            # Enable all interactive widgets
+            for cb in self.comboboxes.values():
+                cb.config(state="readonly")
+            if hasattr(self, 'save_button'): self.save_button.config(state="normal")
+            if hasattr(self, 'load_button'): self.load_button.config(state="normal")
+        else:
+            # Disable all interactive widgets
+            for cb in self.comboboxes.values():
+                cb.config(state="disabled")
+            if hasattr(self, 'save_button'): self.save_button.config(state="disabled")
+            if hasattr(self, 'load_button'): self.load_button.config(state="disabled")
 
     def _create_widgets(self):
         """Creates and arranges the widgets for column mapping."""

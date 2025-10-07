@@ -83,18 +83,24 @@ class RowRangeSelector(tk.Frame):
         else:
             self.info_label.config(text="Invalid range", foreground="red")
 
+    def toggle_controls(self, enabled: bool):
+        """Disables or enables the entry widgets."""
+        state = "normal" if enabled else "disabled"
+        self.start_entry.config(state=state)
+        self.end_entry.config(state=state)
+        if not enabled:
+            # When disabling, also clear the values for a clean state
+            self.start_row_var.set("")
+            self.end_row_var.set("")
+            self.info_label.config(text="Selected: 0 rows", foreground="black")
+
     def enable(self):
-        """Enables the entry widgets."""
-        self.start_entry.config(state="normal")
-        self.end_entry.config(state="normal")
+        """Kept for backward compatibility if needed, redirects to new method."""
+        self.toggle_controls(True)
 
     def disable(self):
-        """Disables the entry widgets and clears values."""
-        self.start_row_var.set("")
-        self.end_row_var.set("")
-        self.info_label.config(text="Selected: 0 rows", foreground="black")
-        self.start_entry.config(state="disabled")
-        self.end_entry.config(state="disabled")
+        """Kept for backward compatibility, redirects to new method."""
+        self.toggle_controls(False)
 
 if __name__ == '__main__':
     def handle_range_update(start, end):
