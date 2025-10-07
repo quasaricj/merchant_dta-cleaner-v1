@@ -20,7 +20,7 @@ class TestColumnMapper(unittest.TestCase):
         with patch('tkinter.ttk.Style') as self.mock_style:
             self.mapper = ColumnMapper(self.root, on_mapping_update=self.mock_callback)
             self.mapper.pack()
-            self.root.update_idletasks()
+        self.mapper.toggle_controls(False)
 
         # Create a dummy excel file for testing
         self.dummy_filepath = "test_mapper_data.xlsx"

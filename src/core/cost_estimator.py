@@ -19,6 +19,7 @@ GEMINI_MODEL_COSTS = {
     "gemini-2.5-flash": { "per_request_estimate": (0.001 * 0.30) + (0.001 * 2.50) }, # ~$0.0028
     "gemini-2.0-flash": { "per_request_estimate": (0.001 * 0.10) + (0.001 * 0.40) }, # ~$0.0005
     "gemini-1.5-flash": { "per_request_estimate": (0.001 * 0.35) + (0.001 * 0.70) }, # Placeholder, ~$0.00105
+    "gemini-1.0-pro": { "per_request_estimate": 0.002 }, # Generic estimate for pro models
     # Default for any other flash model that might appear
     "default_flash": { "per_request_estimate": 0.001 }
 }
@@ -29,6 +30,8 @@ class CostEstimator:
     @staticmethod
     def get_model_cost(model_name: str) -> float:
         """Gets the estimated cost per request for a given Gemini model."""
+        if not model_name:
+            return GEMINI_MODEL_COSTS["default_flash"]["per_request_estimate"]
         for key, costs in GEMINI_MODEL_COSTS.items():
             if key in model_name:
                 return costs["per_request_estimate"]
@@ -36,15 +39,18 @@ class CostEstimator:
 
     @staticmethod
     def estimate_cost(num_rows: int, mode: str, model_name: Optional[str]) -> float:
-        """Estimates the total cost for a given number of rows and processing mode."""
+        """
+        Estimates the total cost for a given number of rows and processing mode
+        using a simplified "maximum expected" model of 5 API calls per row.
+        """
         if num_rows <= 0 or not model_name:
             return 0.0
 
         gemini_cost = CostEstimator.get_model_cost(model_name)
-        cost_per_row = gemini_cost + API_COSTS['google_search_per_query']
 
-        if mode == "Enhanced":
-            cost_per_row += API_COSTS['google_places_find_place']
+        # Per user request, assume a max of 5 API calls: 1 AI validation + 4 searches.
+        # The 'Enhanced' mode is no longer a factor as the logic is unified.
+        cost_per_row = gemini_cost + (4 * API_COSTS['google_search_per_query'])
 
         total_cost = num_rows * cost_per_row
         return total_cost

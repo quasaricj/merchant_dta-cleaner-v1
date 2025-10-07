@@ -90,10 +90,16 @@ class MainWindow(tk.Tk):
     def create_widgets(self):
         root_frame = ttk.Frame(self, padding="10")
         root_frame.pack(fill="both", expand=True)
+
+        # Bottom frame for progress bar and controls
         progress_frame = ttk.LabelFrame(root_frame, text="Job Progress", padding="10")
         progress_frame.pack(side="bottom", fill="x", pady=10)
         self.progress_monitor = ProgressMonitor(progress_frame, self.pause_job, self.resume_job, self.stop_job, self._run_diagnostics)
-        self.progress_monitor.pack(fill='x', expand=True)
+        self.progress_monitor.pack(side="left", fill='x', expand=True)
+        credit_label = ttk.Label(progress_frame, text="made by jeeban", font=("Arial", 8, "italic"), foreground="gray")
+        credit_label.pack(side="right", padx=5, pady=5)
+
+        # Top frame for configuration options, with a scrollbar
         scroll_container = ttk.Frame(root_frame)
         scroll_container.pack(fill="both", expand=True)
         canvas = tk.Canvas(scroll_container)
@@ -105,9 +111,9 @@ class MainWindow(tk.Tk):
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        self._create_config_widgets(self.config_frame)
 
-    def _create_config_widgets(self, parent):
+        # --- Inlined _create_config_widgets ---
+        parent = self.config_frame
         file_selector_frame = ttk.LabelFrame(parent, text="Step 1: Select Input & Output Files", padding="10")
         file_selector_frame.pack(fill="x", pady=5)
         self.file_selector = FileSelector(file_selector_frame, on_file_select=self.handle_file_selection, on_output_select=self.handle_output_file_selection)
@@ -134,7 +140,7 @@ class MainWindow(tk.Tk):
         self.model_selector = ttk.Combobox(controls_frame, state="disabled", values=[])
         self.model_selector.grid(row=1, column=1, sticky='ew', padx=5)
         self.model_selector.bind("<<ComboboxSelected>>", self._on_model_select)
-        self.cost_label = ttk.Label(controls_frame, text="Estimated Cost: ₹0.00", font=("Arial", 10, "italic"))
+        self.cost_label = ttk.Label(controls_frame, text="Estimated Cost: $0.00", font=("Arial", 10, "italic"))
         self.cost_label.grid(row=2, column=0, columnspan=2, pady=5)
         self.start_button = ttk.Button(controls_frame, text="Start Processing", command=self.start_processing, state="disabled")
         self.start_button.grid(row=3, column=0, columnspan=2, pady=10, ipadx=10, ipady=5)
@@ -150,7 +156,8 @@ class MainWindow(tk.Tk):
         self.job_settings = JobSettings(input_filepath=filepath, output_filepath="", column_mapping=ColumnMapping(merchant_name="<not_mapped>"), start_row=2, end_row=-1, mode="Basic")
         if self.api_keys_validated and self.available_models:
             self.job_settings.model_name = self.model_selector.get().split(" ")[0]
-        self.column_mapper.load_file(filepath)
+        file_columns = self.column_mapper.load_file(filepath)
+        self.output_column_configurator.set_available_columns(file_columns)
         self.output_column_configurator.set_columns(self.job_settings.output_columns)
         self._update_row_range_selector(filepath)
         self.mode_selector.enable()
@@ -178,13 +185,29 @@ class MainWindow(tk.Tk):
         self.update_cost_estimate()
 
     def update_cost_estimate(self):
-        if not self.job_settings or self.job_settings.end_row < self.job_settings.start_row or not self.job_settings.model_name:
-            self.cost_label.config(text="Estimated Cost: ₹0.00", foreground="black")
+        """
+        Updates the cost estimation label in the UI. This is triggered by changes
+        to row range, processing mode, or AI model selection.
+        The cost is now displayed in USD and uses the "maximum expected" model.
+        """
+        if (not self.job_settings or
+                self.job_settings.end_row < self.job_settings.start_row or
+                not self.job_settings.model_name):
+            self.cost_label.config(text="Estimated Cost: $0.00", foreground="black")
             return
+
         num_rows = (self.job_settings.end_row - self.job_settings.start_row) + 1
         total_cost = CostEstimator.estimate_cost(num_rows, self.job_settings.mode, self.job_settings.model_name)
-        self.cost_label.config(text=f"Estimated Cost: ₹{total_cost:.2f}")
-        self.cost_label.config(foreground="red" if not CostEstimator.check_budget(total_cost, num_rows, self.job_settings.budget_per_row) else "black")
+        cost_per_row = total_cost / num_rows if num_rows > 0 else 0
+
+        # Update label text to use USD and show both total and per-row cost
+        cost_text = (f"Est. Max Cost: ${total_cost:.2f} total "
+                     f"(${cost_per_row:.4f}/row)")
+        self.cost_label.config(text=cost_text)
+
+        # Change color if budget is exceeded
+        is_over_budget = not CostEstimator.check_budget(total_cost, num_rows, self.job_settings.budget_per_row)
+        self.cost_label.config(foreground="red" if is_over_budget else "black")
 
     def validate_for_processing(self):
         is_ready = self.api_keys_validated and self.job_settings and self.job_settings.output_filepath and self.job_settings.column_mapping.merchant_name and self.job_settings.column_mapping.merchant_name != "<not_mapped>" and self.job_settings.model_name
@@ -230,16 +253,26 @@ class MainWindow(tk.Tk):
         elif "Failed" in final_status: messagebox.showerror("Job Failed", f"The job ended with an error: {final_status}")
 
     def toggle_config_widgets(self, enabled: bool):
+        """
+        Disables or enables all user-configurable widgets in the main interface
+        to prevent changes during a processing job.
+        """
         state = "normal" if enabled else "disabled"
-        for child in self.config_frame.winfo_children():
-            if isinstance(child, (ttk.LabelFrame, ttk.Frame)):
-                for sub_child in child.winfo_children():
-                    try: sub_child.config(state=state)
-                    except tk.TclError: pass
-        self.file_selector.browse_button.config(state=state)
-        self.start_button.config(state=state if enabled else "disabled")
-        if self.api_keys_validated: self.model_selector.config(state="readonly" if enabled else "disabled")
-        else: self.model_selector.config(state="disabled")
+        # Explicitly toggle each major component
+        self.file_selector.toggle_controls(enabled)
+        self.column_mapper.toggle_controls(enabled)
+        self.row_range_selector.toggle_controls(enabled)
+        self.output_column_configurator.toggle_controls(enabled)
+        self.mode_selector.toggle_controls(enabled)
+
+        # Toggle the Start button separately
+        self.start_button.config(state="normal" if enabled else "disabled")
+
+        # Handle the AI model selector state
+        if self.api_keys_validated:
+            self.model_selector.config(state="readonly" if enabled else "disabled")
+        else:
+            self.model_selector.config(state="disabled")
 
     def reset_ui_for_new_file(self):
         self.job_settings = None

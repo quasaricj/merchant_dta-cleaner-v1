@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import patch, Mock, ANY, MagicMock
 import os
 import pandas as pd
 import time
@@ -28,12 +28,13 @@ class TestJobManager(unittest.TestCase):
             output_filepath=self.test_output_file,
             column_mapping=self.column_mapping,
             start_row=2,
-            end_row=12, # Process all 10 rows of data (2-11)
+            end_row=11, # Process all 10 rows of data (2-11)
             mode="Basic",
             model_name="models/gemini-test"
         )
         self.status_callback = Mock()
         self.completion_callback = Mock()
+        self.mock_view_text_website = MagicMock(return_value="<html></html>")
 
     def tearDown(self):
         """Clean up files created during tests."""
@@ -49,7 +50,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -69,7 +70,7 @@ class TestJobManager(unittest.TestCase):
         self.job_settings.start_row = 4
         self.job_settings.end_row = 8 # Process rows 4, 5, 6, 7, 8 (5 rows total)
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -85,7 +86,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.side_effect = lambda r: time.sleep(0.05) or DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
         manager.start()
         time.sleep(0.1)
         manager.stop()
@@ -105,7 +106,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -124,7 +125,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
