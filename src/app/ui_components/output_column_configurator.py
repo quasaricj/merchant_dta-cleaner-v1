@@ -29,6 +29,7 @@ class OutputColumnConfigurator(tk.Frame):
         super().__init__(parent, *args, **kwargs)
         self.on_update = on_update
         self.columns: List[OutputColumnConfig] = []
+        self.available_columns: List[str] = []
 
         canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
@@ -41,8 +42,30 @@ class OutputColumnConfigurator(tk.Frame):
 
         add_button_frame = ttk.Frame(self)
         add_button_frame.pack(fill="x", pady=5, side="bottom")
-        add_button = ttk.Button(add_button_frame, text="Add Custom Column", command=self._add_column)
-        add_button.pack()
+        self.add_button = ttk.Button(add_button_frame, text="Add Custom Column", command=self._add_column)
+        self.add_button.pack()
+
+    def set_available_columns(self, columns: List[str]):
+        """Sets the list of available column headers from the input file."""
+        self.available_columns = columns
+        self._populate_rows()
+
+    def toggle_controls(self, enabled: bool):
+        """Disables or enables all interactive widgets in the configurator."""
+        if not enabled:
+            state = "disabled"
+            self.add_button.config(state=state)
+            for child in self.scrollable_frame.winfo_children():
+                for widget in child.winfo_children():
+                    if isinstance(widget, (ttk.Combobox, ttk.Entry, ttk.Button)):
+                        widget.config(state=state)
+                    elif isinstance(widget, ttk.Frame):
+                        for button in widget.winfo_children():
+                            if isinstance(button, ttk.Button):
+                                button.config(state=state)
+        else:
+            self.add_button.config(state="normal")
+            self._populate_rows()
 
     def set_columns(self, columns: List[OutputColumnConfig]):
         self.columns = columns
@@ -55,7 +78,7 @@ class OutputColumnConfigurator(tk.Frame):
         header_frame = ttk.Frame(self.scrollable_frame)
         header_frame.pack(fill="x", expand=True, pady=(0, 5))
         ttk.Label(header_frame, text="Source Field", font=("Arial", 9, "bold")).pack(side="left", padx=5, expand=True, fill='x')
-        ttk.Label(header_frame, text="Output Header", font=("Arial", 9, "bold")).pack(side="left", padx=5, expand=True, fill='x')
+        ttk.Label(header_frame, text="Output Header (Select or Type New)", font=("Arial", 9, "bold")).pack(side="left", padx=5, expand=True, fill='x')
         ttk.Label(header_frame, text="Actions", font=("Arial", 9, "bold"), width=15).pack(side="left", padx=5)
         ttk.Separator(self.scrollable_frame, orient='horizontal').pack(fill='x', expand=True, pady=2)
 
@@ -67,8 +90,7 @@ class OutputColumnConfigurator(tk.Frame):
 
             source_var = tk.StringVar(value=self.AVAILABLE_SOURCE_FIELDS.get(col_config.source_field, col_config.source_field))
             available_sources = sorted([v for k, v in self.AVAILABLE_SOURCE_FIELDS.items() if k not in used_sources or k == col_config.source_field])
-
-            source_dropdown = ttk.Combobox(row_frame, textvariable=source_var, values=available_sources, state="readonly" if not col_config.is_custom else "disabled")
+            source_dropdown = ttk.Combobox(row_frame, textvariable=source_var, values=available_sources, state="readonly" if not col_config.is_custom else "disabled", width=40)
             source_dropdown.pack(side="left", padx=5, expand=True, fill='x')
             if not col_config.is_custom:
                 source_dropdown.bind("<<ComboboxSelected>>", partial(self._update_source, i, source_var))
@@ -76,9 +98,10 @@ class OutputColumnConfigurator(tk.Frame):
                 source_var.set("Custom/Blank")
 
             header_var = tk.StringVar(value=col_config.output_header)
-            header_entry = ttk.Entry(row_frame, textvariable=header_var)
-            header_entry.pack(side="left", padx=5, expand=True, fill='x')
-            header_entry.bind("<FocusOut>", partial(self._update_header, i, header_var))
+            header_combo = ttk.Combobox(row_frame, textvariable=header_var, values=self.available_columns, width=40)
+            header_combo.pack(side="left", padx=5, expand=True, fill='x')
+            header_combo.bind("<FocusOut>", partial(self._update_header, i, header_var))
+            header_combo.bind("<<ComboboxSelected>>", partial(self._update_header, i, header_var))
 
             button_subframe = ttk.Frame(row_frame, width=15)
             button_subframe.pack(side="left", padx=5)

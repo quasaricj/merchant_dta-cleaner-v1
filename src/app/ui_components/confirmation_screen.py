@@ -40,7 +40,7 @@ class ConfirmationScreen(tk.Toplevel):
             "AI Model": self.settings.model_name,
             "Row Range": f"{self.settings.start_row} to {self.settings.end_row}",
             "Total Rows to Process": f"{num_rows}",
-            "Estimated Cost": f"₹{total_cost:.2f}"
+            "Estimated Cost": f"${total_cost:.2f}"
         }
 
         for i, (key, value) in enumerate(summary_data.items()):
@@ -66,7 +66,7 @@ class ConfirmationScreen(tk.Toplevel):
         self.cancel_button.pack(side="right")
 
         if not CostEstimator.check_budget(total_cost, num_rows, self.settings.budget_per_row):
-            warning_label = ttk.Label(main_frame, text=f"Warning: Estimated cost exceeds the budget of ₹{self.settings.budget_per_row:.2f} per row.", foreground="red", wraplength=400)
+            warning_label = ttk.Label(main_frame, text=f"Warning: Estimated cost exceeds the budget of ${self.settings.budget_per_row:.2f} per row.", foreground="red", wraplength=400)
             warning_label.pack(pady=(10, 0))
 
     def _on_confirm(self):

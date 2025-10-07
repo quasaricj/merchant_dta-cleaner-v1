@@ -4,32 +4,25 @@ from src.core.cost_estimator import CostEstimator, API_COSTS
 class TestCostEstimator(unittest.TestCase):
 
     def test_estimate_cost_basic_mode(self):
-        """Test cost estimation for the Basic processing mode."""
+        """Test cost estimation for the Basic processing mode using the 'max expected' model."""
         num_rows = 100
-        model_name = "models/gemini-2.0-flash"  # A sample model name
+        model_name = "models/gemini-2.0-flash"
         gemini_cost = CostEstimator.get_model_cost(model_name)
-        expected_cost_per_row = gemini_cost + API_COSTS['google_search_per_query']
+        # The model is now 1 AI call + 4 Search queries, regardless of mode.
+        expected_cost_per_row = gemini_cost + (4 * API_COSTS['google_search_per_query'])
         expected_total_cost = num_rows * expected_cost_per_row
         self.assertAlmostEqual(
             CostEstimator.estimate_cost(num_rows, "Basic", model_name),
             expected_total_cost
         )
 
-    def test_estimate_cost_enhanced_mode(self):
-        """Test cost estimation for the Enhanced processing mode."""
+    def test_estimate_cost_enhanced_mode_is_same_as_basic(self):
+        """Test that Enhanced mode cost is now the same as Basic mode."""
         num_rows = 100
-        model_name = "models/gemini-2.0-flash"  # A sample model name
-        gemini_cost = CostEstimator.get_model_cost(model_name)
-        expected_cost_per_row = (
-            gemini_cost +
-            API_COSTS['google_search_per_query'] +
-            API_COSTS['google_places_find_place']
-        )
-        expected_total_cost = num_rows * expected_cost_per_row
-        self.assertAlmostEqual(
-            CostEstimator.estimate_cost(num_rows, "Enhanced", model_name),
-            expected_total_cost
-        )
+        model_name = "models/gemini-2.0-flash"
+        basic_cost = CostEstimator.estimate_cost(num_rows, "Basic", model_name)
+        enhanced_cost = CostEstimator.estimate_cost(num_rows, "Enhanced", model_name)
+        self.assertEqual(basic_cost, enhanced_cost)
 
     def test_estimate_cost_zero_rows(self):
         """Test that the cost is zero for zero rows."""
