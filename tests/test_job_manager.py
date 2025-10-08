@@ -34,6 +34,8 @@ class TestJobManager(unittest.TestCase):
         )
         self.status_callback = Mock()
         self.completion_callback = Mock()
+        self.logo_status_callback = Mock()
+        self.logo_completion_callback = Mock()
         self.mock_view_text_website = MagicMock(return_value="<html></html>")
 
     def tearDown(self):
@@ -50,7 +52,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -70,7 +72,7 @@ class TestJobManager(unittest.TestCase):
         self.job_settings.start_row = 4
         self.job_settings.end_row = 8 # Process rows 4, 5, 6, 7, 8 (5 rows total)
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -86,7 +88,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.side_effect = lambda r: time.sleep(0.05) or DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
         manager.start()
         time.sleep(0.1)
         manager.stop()
@@ -106,7 +108,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 
@@ -125,7 +127,7 @@ class TestJobManager(unittest.TestCase):
         mock_engine_instance.process_record.return_value = DUMMY_PROCESSED_RECORD
         MockProcessingEngine.return_value = mock_engine_instance
 
-        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.mock_view_text_website)
+        manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
         manager.start()
         manager._thread.join(timeout=5)
 

@@ -90,7 +90,7 @@ class OutputColumnConfigurator(tk.Frame):
 
             source_var = tk.StringVar(value=self.AVAILABLE_SOURCE_FIELDS.get(col_config.source_field, col_config.source_field))
             available_sources = sorted([v for k, v in self.AVAILABLE_SOURCE_FIELDS.items() if k not in used_sources or k == col_config.source_field])
-            source_dropdown = ttk.Combobox(row_frame, textvariable=source_var, values=available_sources, state="readonly" if not col_config.is_custom else "disabled", width=40)
+            source_dropdown = ttk.Combobox(row_frame, textvariable=source_var, values=available_sources, state="readonly" if not col_config.is_custom else "disabled", width=50)
             source_dropdown.pack(side="left", padx=5, expand=True, fill='x')
             if not col_config.is_custom:
                 source_dropdown.bind("<<ComboboxSelected>>", partial(self._update_source, i, source_var))
@@ -98,7 +98,7 @@ class OutputColumnConfigurator(tk.Frame):
                 source_var.set("Custom/Blank")
 
             header_var = tk.StringVar(value=col_config.output_header)
-            header_combo = ttk.Combobox(row_frame, textvariable=header_var, values=self.available_columns, width=40)
+            header_combo = ttk.Combobox(row_frame, textvariable=header_var, values=self.available_columns, width=50)
             header_combo.pack(side="left", padx=5, expand=True, fill='x')
             header_combo.bind("<FocusOut>", partial(self._update_header, i, header_var))
             header_combo.bind("<<ComboboxSelected>>", partial(self._update_header, i, header_var))

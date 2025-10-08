@@ -76,6 +76,9 @@ class MainWindow(tk.Tk):
         self.cost_label: ttk.Label
         self.start_button: ttk.Button
         self.progress_monitor: ProgressMonitor
+        self.logo_progress_frame: ttk.Frame
+        self.logo_progress_bar: ttk.Progressbar
+        self.logo_status_label: ttk.Label
         self.start_button_tooltip: Optional[Tooltip] = None
         self.available_models: List[str] = []
         self.api_keys_validated = False
@@ -98,7 +101,16 @@ class MainWindow(tk.Tk):
         progress_frame = ttk.LabelFrame(root_frame, text="Job Progress", padding="10")
         progress_frame.pack(side="bottom", fill="x", pady=10)
         self.progress_monitor = ProgressMonitor(progress_frame, self.pause_job, self.resume_job, self.stop_job, self._run_diagnostics)
-        self.progress_monitor.pack(side="left", fill='x', expand=True)
+        self.progress_monitor.pack(fill='x', expand=True)
+
+        # Logo scraping progress section (initially hidden)
+        self.logo_progress_frame = ttk.Frame(progress_frame)
+        ttk.Label(self.logo_progress_frame, text="Logo Scraping:", font=("Arial", 10, "bold")).pack(side="left", padx=(5,0))
+        self.logo_status_label = ttk.Label(self.logo_progress_frame, text="Idle", width=40, anchor='w')
+        self.logo_status_label.pack(side="left", fill='x', padx=5)
+        self.logo_progress_bar = ttk.Progressbar(self.logo_progress_frame, orient='horizontal', mode='determinate', length=100)
+        self.logo_progress_bar.pack(side="left", fill='x', expand=True, padx=5)
+
         credit_label = ttk.Label(progress_frame, text="made by jeeban", font=("Arial", 8, "italic"), foreground="gray")
         credit_label.pack(side="right", padx=5, pady=5)
 
@@ -232,7 +244,12 @@ class MainWindow(tk.Tk):
         if not confirmation_dialog.show(): return
         self.toggle_config_widgets(enabled=False)
         self.progress_monitor.job_started()
-        self.job_manager = JobManager(self.job_settings, self.api_config, self.handle_status_update, self.handle_completion, view_text_website)
+        self.job_manager = JobManager(
+            self.job_settings, self.api_config,
+            self.handle_status_update, self.handle_completion,
+            self.handle_logo_status_update, self.handle_logo_completion,
+            view_text_website
+        )
         self.job_manager.start()
 
     def pause_job(self):
@@ -247,21 +264,42 @@ class MainWindow(tk.Tk):
     def handle_status_update(self, current: int, total: int, status: str): self.after(0, self.progress_monitor.update_progress, current, total, status)
     def handle_completion(self, final_status: str): self.after(0, self._finalize_job_ui, final_status)
 
+    def handle_logo_status_update(self, current: int, total: int, name: str):
+        self.after(0, self._update_logo_progress_ui, current, total, name)
+
+    def _update_logo_progress_ui(self, current: int, total: int, name: str):
+        if total > 0:
+            self.logo_progress_bar['value'] = current
+            self.logo_progress_bar['maximum'] = total
+        self.logo_status_label.config(text=f"Scraping {current}/{total}: {name[:35]}...")
+
+    def handle_logo_completion(self, final_status: str):
+        self.after(0, self._finalize_logo_scraping_ui, final_status)
+
+    def _finalize_logo_scraping_ui(self, final_status: str):
+        messagebox.showinfo("Logo Scraping Complete", final_status)
+        self.logo_progress_frame.pack_forget()
+        self.toggle_config_widgets(enabled=True)
+        self.job_manager = None # Fully release the manager now
+
     def _finalize_job_ui(self, final_status: str):
         output_path = self.job_settings.output_filepath if self.job_settings else None
         self.progress_monitor.show_results(final_status, output_path)
-        self.toggle_config_widgets(enabled=True)
-        self.job_manager = None
 
-        if "Stopped" in final_status:
-            if output_path and os.path.exists(output_path):
-                self._show_stopped_dialog(output_path)
-            else:
-                messagebox.showinfo("Job Stopped", "The job was stopped, but no output file was generated.")
+        if "Stopped" in final_status or "Failed" in final_status:
+            self.toggle_config_widgets(enabled=True)
+            self.job_manager = None
+            if "Stopped" in final_status:
+                if output_path and os.path.exists(output_path):
+                    self._show_stopped_dialog(output_path)
+                else:
+                    messagebox.showinfo("Job Stopped", "The job was stopped, but no output file was generated.")
+            else: # Failed
+                messagebox.showerror("Job Failed", f"The job ended with an error: {final_status}")
         elif "Successfully" in final_status:
-            messagebox.showinfo("Job Complete", f"The job finished with status: {final_status}")
-        elif "Failed" in final_status:
-            messagebox.showerror("Job Failed", f"The job ended with an error: {final_status}")
+            messagebox.showinfo("Processing Complete", "Main data processing is complete. Now starting logo scraping...")
+            self.logo_progress_frame.pack(fill='x', expand=True, pady=5)
+            self.toggle_config_widgets(enabled=False) # Keep UI frozen
 
     def _show_stopped_dialog(self, output_path: str):
         """Shows a custom dialog with options for the stopped job's output file."""

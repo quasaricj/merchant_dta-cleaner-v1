@@ -19,6 +19,7 @@ from src.core.data_model import (JobSettings, MerchantRecord, ApiConfig,
                                   ColumnMapping, OutputColumnConfig)
 from src.core.processing_engine import ProcessingEngine
 from src.services.google_api_client import GoogleApiClient
+from src.core.logo_scraper import LogoScraper
 
 
 class JobManager:
@@ -26,11 +27,14 @@ class JobManager:
 
     def __init__(self, settings: JobSettings, api_config: ApiConfig,
                  status_callback: Callable, completion_callback: Callable,
+                 logo_status_callback: Callable, logo_completion_callback: Callable,
                  view_text_website_func: Callable[[str], str]):
         self.settings = settings
         self.api_config = api_config
         self.status_callback = status_callback
         self.completion_callback = completion_callback
+        self.logo_status_callback = logo_status_callback
+        self.logo_completion_callback = logo_completion_callback
         self.view_text_website_func = view_text_website_func
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
@@ -110,8 +114,11 @@ class JobManager:
             else:
                 self._write_output_file(original_df)
                 self._cleanup_checkpoint()
-                self.logger.info("Job completed successfully.")
+                self.logger.info("Main data processing completed successfully.")
                 self.completion_callback("Job Completed Successfully")
+
+                # Start logo scraping in a separate thread
+                self._start_logo_scraping()
 
         except Exception as e:
             self.logger.critical(f"An unexpected error occurred in the job thread: {e}", exc_info=True)
@@ -215,3 +222,37 @@ class JobManager:
         if os.path.exists(self.checkpoint_path):
             os.remove(self.checkpoint_path)
             self.logger.info("Checkpoint file cleaned up.")
+
+    def _start_logo_scraping(self):
+        """Initializes and starts the logo scraping process in a background thread."""
+        with self._lock:
+            # Ensure we are using the records that were actually processed.
+            records_for_scraping = list(self.processed_records)
+
+        if not records_for_scraping:
+            self.logger.info("No records to scrape logos for.")
+            self.logo_completion_callback("Logo scraping skipped: no records processed.")
+            return
+
+        # Create the specific output directory for logos
+        base_dir = os.path.dirname(self.settings.output_filepath)
+        logo_dir_name = f"logos_of_range_{self.settings.start_row}-{self.settings.end_row}"
+        logo_output_dir = os.path.join(base_dir, logo_dir_name)
+
+        fallback_image = os.path.abspath("data/image_for_logo_scraping_error.png")
+
+        scraper = LogoScraper(records_for_scraping, logo_output_dir, fallback_image)
+
+        def scraping_task():
+            try:
+                self.logger.info(f"Starting logo scraping for {len(records_for_scraping)} records.")
+                scraper.run(progress_callback=self.logo_status_callback)
+                self.logger.info("Logo scraping finished successfully.")
+                self.logo_completion_callback(f"Logo scraping complete. See folder: {logo_output_dir}")
+            except Exception as e:
+                self.logger.error(f"Logo scraping failed: {e}", exc_info=True)
+                self.logo_completion_callback(f"Logo scraping failed: {e}")
+
+        # Run the scraping task in a separate thread to not block the UI
+        logo_thread = threading.Thread(target=scraping_task, daemon=True)
+        logo_thread.start()

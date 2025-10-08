@@ -116,7 +116,7 @@ class TestProcessingEngine(unittest.TestCase):
         # Assert
         self.assertEqual(result.cleaned_merchant_name, "")
         self.assertEqual(result.remarks, "NA")
-        self.assertIn("Could not find any relevant business", result.evidence)
+        self.assertIn("No valid business match was found", result.evidence)
 
     def test_website_overrides_socials_rule(self):
         """
