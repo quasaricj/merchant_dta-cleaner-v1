@@ -26,128 +26,183 @@ class ProcessingEngine:
 
     def process_record(self, record: MerchantRecord) -> MerchantRecord:
         """
-        Executes the full cleaning and enrichment workflow for a single record.
-        It implements the 6-step search logic, stopping at the first valid result.
+        Executes a dynamic 6-step search, verifying promising results with AI and
+        halting as soon as a satisfactory one is confirmed.
         """
         self._pre_process_name(record)
         queries = self._build_search_queries(record)
 
-        best_analysis = None
+        final_analysis = None
         final_query = None
-        last_analysis = None
-        last_query = None
+        evidence_trail = []
 
-        for query in queries:
+        for i, query in enumerate(queries):
             analysis = self._perform_search_and_analysis(record, query)
             if not analysis:
+                evidence_trail.append(f"Query {i+1} ('{query}') yielded no usable analysis.")
                 continue
 
-            last_analysis = analysis
-            last_query = query
+            # Always keep the latest analysis in case we fall through the whole loop
+            final_analysis = analysis
+            final_query = query
+            base_evidence = f"Query {i+1} ('{query}') -> '{analysis.get('match_type')}/{analysis.get('business_status')}'"
 
-            # If a plausible match is found, consider it the best so far and stop.
-            if analysis.get("match_type") in ["Exact Match", "Partial Match", "Aggregator Site"]:
-                best_analysis = analysis
-                final_query = query
-                break
+            # Check if the result is promising enough to attempt AI website verification.
+            is_promising = (analysis.get("match_type") == "Exact Match" and
+                            analysis.get("business_status") == "Operational" and
+                            bool(analysis.get("website")))
 
-        if best_analysis and final_query:
-            # A plausible match was found, apply the main business logic.
-            self._apply_business_rules(record, best_analysis, final_query)
-        elif last_analysis and last_query:
-            # No plausible match, but we have some analysis (e.g., BUSINESS_CLOSED).
-            # Let the business rules handle this terminal state.
-            self._apply_business_rules(record, last_analysis, last_query)
+            if is_promising:
+                website_url = analysis.get("website", "")
+                verification = self._verify_website_url(website_url, record)
+                analysis['website_verification'] = verification  # Store verification result
+
+                if verification and verification.get("is_valid"):
+                    evidence_trail.append(f"{base_evidence}. Website verified: {verification.get('reasoning')}. Match found, halting search.")
+                    final_analysis = analysis  # This is our definitive result
+                    break  # Satisfactory result found, stop searching.
+                else:
+                    reason = verification.get('reasoning', 'Verification failed')
+                    evidence_trail.append(f"{base_evidence}. Website rejected: {reason}. Continuing search.")
+            else:
+                evidence_trail.append(f"{base_evidence}. Not a high-confidence match, continuing search.")
+
+        if final_analysis and final_query:
+            self._apply_business_rules(record, final_analysis, final_query, evidence_trail)
         else:
-            # No analysis was ever returned from the API, so this is a hard failure.
-            record.cleaned_merchant_name = "" # Ensure name is blank
+            record.cleaned_merchant_name = ""
             record.website = ""
             record.socials = []
             record.logo_filename = ""
             record.remarks = "NA"
-            record.evidence = f"No valid business match found for '{record.original_name}' after all search attempts."
+            record.evidence = f"No valid business match found. Search trail: {' -> '.join(evidence_trail)}"
 
         return record
 
     def _pre_process_name(self, record: MerchantRecord):
-        """
-        Performs very light, deterministic cleaning on the raw merchant name
-        before passing it to the AI.
-        """
+        """Performs light, deterministic cleaning on the raw merchant name."""
         raw_name = record.original_name
         if not raw_name or not isinstance(raw_name, str):
             record.cleaned_merchant_name = ""
             return
-
-        # Remove leading numbers, special chars, and known prefixes
         cleaned_name = re.sub(r'^\d+\s*|^\W+', '', raw_name.upper().strip())
         record.cleaned_merchant_name = cleaned_name.strip()
 
     def _perform_search_and_analysis(self, record: MerchantRecord, query: str) -> Optional[Dict[str, Any]]:
-        """
-        Performs a web search and returns the AI's analysis object.
-        """
+        """Performs a web search and returns the AI's analysis object."""
         search_results = self.api_client.search_web(query)
         record.cost_per_row += cost_estimator.API_COSTS["google_search_per_query"]
         if not search_results:
             return None
-
         ai_analysis = self.api_client.analyze_search_results(
             search_results, record.original_name, record.cleaned_merchant_name, query
         )
         if self.settings.model_name:
             record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name)
-
         return ai_analysis
 
-    def _apply_business_rules(self, record: MerchantRecord, analysis: Dict[str, Any], query: str):
+    def _verify_website_url(self, url: str, record: MerchantRecord) -> Optional[Dict[str, Any]]:
         """
-        Applies the strict business logic from the SRS to populate the final record fields
-        based on the detailed analysis from the AI.
+        Fetches website content and uses AI to verify if it's a legitimate business site.
+        Returns the verification result and handles cost attribution.
         """
-        business_status = analysis.get("business_status")
-        match_type = analysis.get("match_type")
+        if not url:
+            return {"is_valid": False, "reasoning": "No URL provided."}
+        try:
+            content = self.view_text_website(url)
+            if not content or not content.strip():
+                return {"is_valid": False, "reasoning": "Website content was empty or could not be fetched."}
 
-        # Rule: Do not accept "Permanently Closed" or "Historical/Archived" businesses.
-        if business_status in ["Permanently Closed", "Historical/Archived"]:
-            record.cleaned_merchant_name = ""
-            record.remarks = "NA"
-            record.evidence = analysis.get("evidence", f"Business rejected due to status: {business_status}")
-            return
+            if self.settings.model_name:
+                record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name)
 
-        # Rule: If no valid match, leave fields blank and set remarks to "NA".
-        if match_type == "No Match":
-            record.cleaned_merchant_name = ""
-            record.remarks = "NA"
-            record.evidence = analysis.get("evidence", "No valid business match found.")
-            return
+            return self.api_client.verify_website_with_ai(content, record.cleaned_merchant_name)
+        except Exception as e:
+            print(f"Error during website verification for {url}: {e}")
+            return {"is_valid": False, "reasoning": f"An unexpected error occurred: {e}"}
 
-        # A plausible match was found. Populate fields according to the strict rules.
-        record.cleaned_merchant_name = analysis.get("cleaned_merchant_name", "")
-        record.evidence = analysis.get("evidence", "")
-        record.evidence_links.append(f"https://www.google.com/search?q={query.replace(' ', '+')}")
-
+    def _apply_business_rules(self, record: MerchantRecord, analysis: Dict[str, Any], query: str, evidence_trail: List[str]):
+        """
+        Applies strict business logic to populate the final record fields based on AI analysis
+        and AI-powered website verification.
+        """
         website_url = analysis.get("website", "")
         social_links = analysis.get("social_media_links", [])
 
-        # Rule: Website takes precedence. Social links are ONLY used if no website is found.
-        if website_url:
+        # Step 1: Perform final website verification if it wasn't done already
+        verification = analysis.get('website_verification')
+        if not verification and website_url:
+            # This happens if the first promising result was actually the last query tried.
+            verification = self._verify_website_url(website_url, record)
+            analysis['website_verification'] = verification
+            evidence_trail.append(f"Final verification on last resort URL: {verification.get('reasoning', 'N/A')}")
+
+        # Step 2: Set the final evidence using the new narrative generator
+        record.evidence = self._generate_final_evidence(analysis, evidence_trail)
+
+        # Step 3: Apply final business logic based on the outcomes
+        business_status = analysis.get("business_status")
+        match_type = analysis.get("match_type")
+        is_website_valid = verification and verification.get("is_valid")
+
+        # Rejection rules
+        if business_status in ["Permanently Closed", "Historical/Archived"] or match_type == "No Match":
+            record.cleaned_merchant_name = ""
+            record.remarks = "NA"
+            return
+
+        # Acceptance rules
+        record.cleaned_merchant_name = analysis.get("cleaned_merchant_name", "")
+        record.evidence_links.append(f"https://www.google.com/search?q={query.replace(' ', '+')}")
+
+        if is_website_valid:
             record.website = website_url
-            record.socials = []  # Explicitly clear socials per the rule.
-            record.remarks = ""  # Clear remarks on successful website match.
+            record.socials = []
+            record.remarks = ""
         elif social_links:
             record.website = ""
             record.socials = social_links
             record.remarks = "website unavailable"
         else:
-            # Found a merchant name, but no website or socials.
             record.website = ""
             record.socials = []
             record.remarks = "website unavailable"
 
-        # Rule: Set logo filename based on website or merchant name.
         record.logo_filename = self._generate_logo_filename(record)
 
+    def _generate_final_evidence(self, analysis: Dict[str, Any], evidence_trail: List[str]) -> str:
+        """
+        Constructs a clear, human-readable evidence string based on the final analysis
+        and the entire search process.
+        """
+        match_type = analysis.get("match_type", "N/A")
+        business_status = analysis.get("business_status", "N/A")
+        ai_evidence = analysis.get("evidence", "AI evidence was not provided.")
+        verification = analysis.get("website_verification")
+        trail_str = ' -> '.join(evidence_trail)
+
+        # Handle terminal rejection cases first
+        if business_status in ["Permanently Closed", "Historical/Archived"]:
+            return f"Rejected because the business was found to be '{business_status}'. Search trail: {trail_str}"
+        if match_type == "No Match":
+            return f"No valid business match was found after all attempts. Search trail: {trail_str}"
+
+        # Build the narrative for a plausible match
+        narrative = f"The AI's analysis of search results identified a '{match_type}' for a business with status '{business_status}'. "
+        narrative += f"The AI's reasoning was: '{ai_evidence}'. "
+
+        if verification:
+            if verification.get("is_valid"):
+                narrative += f"A follow-up AI check of the website confirmed it is a valid, operational site. "
+                narrative += f"Verification reason: '{verification.get('reasoning', 'N/A')}'. "
+            else:
+                narrative += f"However, a follow-up AI check of the website REJECTED it. "
+                narrative += f"Rejection reason: '{verification.get('reasoning', 'N/A')}'. "
+        else:
+            narrative += "No website was found or verified. "
+
+        narrative += f"The full search process was: {trail_str}"
+        return narrative
 
     def _generate_logo_filename(self, record: MerchantRecord) -> str:
         """Creates a standardized logo filename based on strict rules."""

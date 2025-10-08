@@ -227,3 +227,85 @@ class GoogleApiClient:
         except Exception as e:
             print(f"An unexpected error occurred during AI analysis for '{cleaned_name}': {e}")
             return None
+
+    def verify_website_with_ai(self, website_content: str, merchant_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Uses the AI model to analyze the raw text content of a website to determine
+        if it's a valid, operational business site.
+
+        Args:
+            website_content: The text/HTML content of the website's main page.
+            merchant_name: The name of the merchant being investigated, for context.
+
+        Returns:
+            A dictionary containing the AI's verdict, e.g.,
+            {"is_valid": True, "reasoning": "The website contains clear business information."}
+            or None if an error occurs.
+        """
+        if not self.gemini_model:
+            raise ConnectionError("Gemini model is not configured.")
+
+        # Truncate content to avoid exceeding token limits, focusing on the start of the page.
+        truncated_content = website_content[:15000]
+
+        prompt = f"""
+        You are a website verification specialist. Your job is to determine if a website is a real, operational business site or if it's invalid for business use.
+        Invalid sites include those that are parked, for sale, under construction, show error messages (like 404), or have placeholder/template content with no real information.
+
+        **CONTEXT:**
+        - I am verifying a merchant named: "{merchant_name}"
+        - The following is the raw text/HTML content from their potential website's home page:
+        ---
+        {truncated_content}
+        ---
+
+        **YOUR TASK:**
+        Analyze the provided content and determine the website's status.
+
+        **RULES:**
+        1.  **Valid Site:** A valid site must show clear signs of being an active, official business page. Look for things like a company logo, "About Us" section, contact details, product/service descriptions, etc.
+        2.  **Invalid Site - Parked/For Sale:** Look for explicit phrases like "This domain is for sale," "parked," "buy this domain."
+        3.  **Invalid Site - Under Construction:** Look for "coming soon," or similar language.
+        4.  **Invalid Site - Error/Empty:** Look for common error messages (e.g., "Not Found," "Forbidden") or a very small amount of content that indicates an empty page.
+        5.  **Invalid Site - Template:** Look for placeholder text like "Lorem Ipsum," "Welcome to your new site," or generic template language without specific business details.
+
+        **OUTPUT:**
+        Provide your analysis in a strict JSON format with two keys:
+        - `is_valid`: A boolean (`true` if it's a valid business site, `false` otherwise).
+        - `reasoning`: A brief, one-sentence explanation for your decision in simple English.
+
+        Example Output 1 (Valid):
+        ```json
+        {{
+          "is_valid": true,
+          "reasoning": "The website contains specific company information, including services and contact details."
+        }}
+        ```
+
+        Example Output 2 (Invalid):
+        ```json
+        {{
+          "is_valid": false,
+          "reasoning": "The page explicitly states the domain is parked and for sale."
+        }}
+        ```
+
+        Now, analyze the provided website content and return the JSON output.
+        """
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            # Handle potential markdown in the response
+            cleaned_response = response.text.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+
+            return json.loads(cleaned_response)
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"Error decoding AI JSON response for website verification: {e}\\nResponse was: {response.text}")
+            return {{"is_valid": False, "reasoning": "AI response was not valid JSON."}}
+        except Exception as e:
+            print(f"An unexpected error occurred during AI website verification: {e}")
+            return {{"is_valid": False, "reasoning": f"An API error occurred: {e}"}}
