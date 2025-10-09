@@ -62,38 +62,46 @@ class GoogleApiClient:
             print(f"An unexpected error occurred during model listing: {e}")
             return None
 
-    def clean_merchant_name(self, raw_name: str) -> Optional[Dict[str, Any]]:
-        """Uses a hybrid of regex and AI to clean and standardize a merchant name."""
-        import re
+    def remove_aggregators(self, raw_name: str) -> Dict[str, Any]:
+        """
+        Uses a targeted AI prompt to identify and remove payment aggregator prefixes
+        from a raw merchant string.
+        """
         if not self.gemini_model:
-            raise ConnectionError("Gemini model is not configured. Check API key and model selection.")
-        if not raw_name or not raw_name.strip():
+            raise ConnectionError("Gemini model is not configured.")
+        if not raw_name or not isinstance(raw_name, str) or not raw_name.strip():
             return {"cleaned_name": "", "reasoning": "Input was empty."}
 
-        pre_processed_name = re.sub(r'^[0-9\s*@]+', '', raw_name).strip()
-
         prompt = f"""
-        From the merchant string "{pre_processed_name}", extract only the core business name.
-        - Ignore location indicators like "COLON ROPA", "TOLUCA", "GUAD 1", "DE JULIO".
-        - Extract the primary brand name.
+        You are a data cleaning specialist. Your task is to remove common payment aggregator prefixes from a given merchant string.
+        Aggregators include, but are not limited to: "PAYPAL *", "PP*", "STRIPE*", "SQ*", "AMZNMKTPLACE", "RAZORPAY*", "PHONEPE*", "UBER EATS*", "GOOGLEPAY*".
+        The aggregator can appear anywhere. Your goal is to return only the actual merchant's name.
 
-        Examples:
-        - Input: "FAMSA COLON ROPA" -> Output: {{"cleaned_name": "FAMSA", "reasoning": "Extracted brand name 'FAMSA' and ignored location."}}
-        - Input: "MPROMODA TOLUCA" -> Output: {{"cleaned_name": "MPROMODA", "reasoning": "Extracted brand name 'MPROMODA'."}}
-        - Input: "OPENPAY ANGELDELCIE" -> Output: {{"cleaned_name": "OPENPAY", "reasoning": "Extracted payment processor 'OPENPAY'."}}
-        - Input: "PLAZA MAYOR" -> Output: {{"cleaned_name": "PLAZA MAYOR", "reasoning": "Identified as a business name."}}
-        - Input: "FOTOSDERUNNERGDL" -> Output: {{"cleaned_name": "FOTOSDERUNNERGDL", "reasoning": "Treated as a single business name."}}
-        - Input: "LITTLE 8 DE JULIO" -> Output: {{"cleaned_name": "LITTLE", "reasoning": "Extracted brand 'LITTLE' and ignored location '8 DE JULIO'."}}
+        - If an aggregator is found, return the cleaned name and explain the removal.
+        - If no aggregator is found, return the original name.
+        - Preserve the original case of the non-aggregator part of the string.
 
-        Provide the output in a strict JSON format with two keys: "cleaned_name" and "reasoning".
+        **EXAMPLES:**
+        - Input: "PAYPAL *MYCOOLSTORE" -> Output: {{"cleaned_name": "MYCOOLSTORE", "removal_reason": "Removed 'PAYPAL *' prefix."}}
+        - Input: "SQ*The Coffee Shop" -> Output: {{"cleaned_name": "The Coffee Shop", "removal_reason": "Removed 'SQ*' prefix."}}
+        - Input: "Regular Business Name" -> Output: {{"cleaned_name": "Regular Business Name", "removal_reason": "No aggregator found."}}
+        - Input: "UBER EATS*Tasty Burger" -> Output: {{"cleaned_name": "Tasty Burger", "removal_reason": "Removed 'UBER EATS*' prefix."}}
+        - Input: "AMZNMKTPLACE My Product" -> Output: {{"cleaned_name": "My Product", "removal_reason": "Removed 'AMZNMKTPLACE' prefix."}}
+
+        **TASK:**
+        Process the following merchant string: "{raw_name}"
+
+        **OUTPUT (Strict JSON format):**
+        Return a single JSON object with two keys: "cleaned_name" and "removal_reason".
         """
         try:
             response = self.gemini_model.generate_content(prompt)
             cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
             return json.loads(cleaned_response)
         except Exception as e:
-            print(f"Error during Gemini call for '{raw_name}': {e}")
-            return None
+            print(f"Error during aggregator removal for '{raw_name}': {e}")
+            # Fallback to returning the original name if AI fails
+            return {"cleaned_name": raw_name, "removal_reason": f"AI processing failed: {e}"}
 
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
         """Performs a web search using the Google Custom Search API."""
@@ -125,10 +133,10 @@ class GoogleApiClient:
             print(f"Error during Google Places API call for '{query}': {e}")
             return None
 
-    def analyze_search_results(self, search_results: List[Dict], raw_name: str, cleaned_name: str, query: str) -> Optional[Dict[str, Any]]:
+    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str) -> Optional[Dict[str, Any]]:
         """
-        Uses a master AI prompt to analyze search results and extract potential entity information
-        based on a detailed set of business rules.
+        Uses an AI prompt to analyze search results and extract candidate information.
+        This prompt is for extraction, not final decision-making.
         """
         if not self.gemini_model:
             raise ConnectionError("Gemini model is not configured.")
@@ -138,77 +146,44 @@ class GoogleApiClient:
             formatted_results += f"Result {i}:\\nTitle: {result.get('title', 'N/A')}\\nLink: {result.get('link', 'N/A')}\\nSnippet: {result.get('snippet', 'N/A')}\\n\\n"
 
         prompt = f"""
-        You are an expert data analyst for a data cleaning agency. Your task is to solve a critical problem for credit card companies: messy, inconsistent merchant names on transaction records. You must act as an intelligent human researcher to find the true, official merchant information based on the provided search results.
+        You are a data extraction specialist. Your task is to analyze a list of web search results and extract potential business information based on a query. Do not make final decisions; your job is to identify all plausible candidates for a human reviewer (or a downstream process) to evaluate.
 
-        **THE CORE PROBLEM:**
-        Merchant names on credit card statements are often messy. This is because the name is sent by the merchant's bank and can be a legal name, an abbreviation, or include extra details like store numbers or payment aggregator prefixes (e.g., "PAYPAL*", "STRIPE*"). Your job is to cut through this noise and find the ground truth.
+        **CONTEXT:**
+        - The original, messy merchant name was: "{original_name}"
+        - The search query used was: "{query}"
+        - The search results are provided below.
 
-        **YOUR TASK:**
-        Based on the provided inputs, analyze the search results and return a structured JSON object with the final, correct data. You must follow the rules precisely. Do not invent information. If something isn't found, leave the corresponding value as an empty string or list.
+        **SEARCH RESULTS:**
+        ---
+        {formatted_results}
+        ---
 
-        **INPUTS FOR YOUR ANALYSIS:**
-        1.  **Raw Merchant String:** `{raw_name}` (This is the original, messy data)
-        2.  **Pre-Cleaned Name (for searching):** `{cleaned_name}`
-        3.  **Search Query Used:** `{query}`
-        4.  **Search Results:**
-            ---
-            {formatted_results}
-            ---
-
-        **BUSINESS RULES FOR POPULATING THE OUTPUT (MUST BE FOLLOWED EXACTLY):**
-
-        **1. `cleaned_merchant_name`**:
-            - The official business name, properly capitalized (e.g., "Reliance Retail", not "RELIANCE RETAIL").
-            - If it's a franchise like "KFC New Delhi", use only the main brand name "KFC".
-            - If no valid business is found, this MUST be an empty string `""`.
-
-        **2. `website`**:
-            - The official, working, and clickable business URL.
-            - It must NOT be a parked domain, "for sale" page, or lead to an error.
-            - It must NOT be a social media page (e.g., facebook.com).
-            - If multiple websites are found, pick the most likely official one.
-            - If a site redirects to a parent company, note this in the evidence but still provide the URL if it's the most official link available.
-            - If no valid website is found, this MUST be an empty string `""`.
-
-        **3. `social_media_links`**:
-            - This field is ONLY populated if a `website` is NOT found.
-            - Provide a list of valid, official social media profile URLs (e.g., Facebook, Instagram).
-            - If multiple profiles are found, pick the one that best matches the location and branding.
-            - A profile must contain business and address information to be considered valid. Do not accept personal profiles.
-            - If no valid social media is found (or if a website was found), this MUST be an empty list `[]`.
-
-        **4. `business_status`**:
-            - Set to one of the following: "Operational", "Permanently Closed", "Historical/Archived", "Uncertain".
-            - You MUST NOT accept businesses that are "Permanently Closed" or "Historical/Archived".
-
-        **5. `match_type`**:
-            - Set to one of the following: "Exact Match", "Partial Match", "Aggregator Site", "No Match".
-            - "Exact Match": High confidence in a direct match with an official website or verified social page.
-            - "Partial Match": A plausible match was found, but it might be from a different location or have a slightly different name.
-            - "Aggregator Site": The only strong evidence comes from sites like Yelp, TripAdvisor, etc.
-            - "No Match": Could not find any relevant business.
-
-        **6. `evidence`**:
-            - **Write in simple, non-technical English.** Explain your reasoning as if to a non-technical auditor.
-            - State which search result you used as the primary source and why.
-            - Explain how you validated the information based on the rules. For example, if you reject a match, clearly state which rule was violated (e.g., "Rejected because the business is marked as permanently closed in Result 2," or "Rejected website from Result 3 because it is a subpage of a mall directory.").
-            - If you find multiple businesses, explain why you chose one over the others.
+        **EXTRACTION RULES:**
+        1.  **`cleaned_merchant_name`**: Extract the most likely official business name. Capitalize it properly (e.g., "Clean Juice"). If it's a franchise (e.g., "KFC New Delhi"), extract the main brand ("KFC"). If multiple names are plausible, choose the one that appears most frequently or officially in the results.
+        2.  **`website_candidates`**: Extract ALL potential official website URLs.
+            - A website URL is NOT a social media page (facebook.com, instagram.com).
+            - A website URL is NOT a page from an aggregator or directory (yelp.com, tripadvisor.com).
+            - List all unique, plausible URLs.
+        3.  **`social_media_candidates`**: Extract ALL potential official social media profile URLs (Facebook, Instagram, LinkedIn, etc.).
+            - A profile must look like a business page, not a personal one.
+            - List all unique, plausible URLs.
+        4.  **`business_status`**: Based on the snippets, determine the most likely status: "Operational", "Permanently Closed", "Uncertain".
+        5.  **`extraction_summary`**: Briefly explain your findings. For example: "Found a likely business name and two potential websites. One social media link was also identified from the search results." Do not try to make a final conclusion.
 
         **FINAL JSON OUTPUT STRUCTURE (Strict):**
-        You must return a single JSON object with the following keys. Do not deviate from this structure.
+        Return a single JSON object. Do not deviate from this structure. If nothing is found for a field, use an empty string or an empty list.
 
         ```json
         {{
           "cleaned_merchant_name": "...",
-          "website": "...",
-          "social_media_links": ["..."],
+          "website_candidates": ["...", "..."],
+          "social_media_candidates": ["...", "..."],
           "business_status": "...",
-          "match_type": "...",
-          "evidence": "..."
+          "extraction_summary": "..."
         }}
         ```
 
-        Now, analyze the inputs and return the final JSON output based on all the rules provided.
+        Now, analyze the inputs and return the JSON containing the extracted candidate data.
         """
         try:
             response = self.gemini_model.generate_content(prompt)

@@ -4,12 +4,16 @@ from src.core.cost_estimator import CostEstimator, API_COSTS
 class TestCostEstimator(unittest.TestCase):
 
     def test_estimate_cost_basic_mode(self):
-        """Test cost estimation for the Basic processing mode using the 'max expected' model."""
+        """Test cost estimation using the new granular, 'max expected' model."""
         num_rows = 100
-        model_name = "models/gemini-2.0-flash"
-        gemini_cost = CostEstimator.get_model_cost(model_name)
-        # The model is now 1 AI call + 4 Search queries, regardless of mode.
-        expected_cost_per_row = gemini_cost + (4 * API_COSTS['google_search_per_query'])
+        model_name = "models/gemini-1.5-flash"
+        # The new estimation model assumes a worst-case scenario for an average row.
+        expected_cost_per_row = (
+            CostEstimator.get_model_cost(model_name, "utility") +
+            CostEstimator.get_model_cost(model_name, "analysis") +
+            CostEstimator.get_model_cost(model_name, "verification") +
+            (4 * API_COSTS['google_search_per_query'])
+        )
         expected_total_cost = num_rows * expected_cost_per_row
         self.assertAlmostEqual(
             CostEstimator.estimate_cost(num_rows, "Basic", model_name),

@@ -1,7 +1,7 @@
 """
 This module provides a stateless utility class for estimating the cost of a
-processing job based on the number of rows and the selected processing mode.
-It is the single source of truth for all API-related costs.
+processing job. It is the single source of truth for all API-related costs,
+with granular estimates for different types of AI calls.
 """
 from typing import Optional
 
@@ -12,45 +12,80 @@ API_COSTS = {
     "google_places_find_place": 0.017, # $17.00 per 1000 requests
 }
 
-# Costs for different Gemini models. The key should be a substring of the model name from the API.
-# We estimate an average of 1000 input and 1000 output tokens per cleaning request.
-# Formula: Cost = ( (1000 / 1,000,000) * input_price ) + ( (1000 / 1,000,000) * output_price )
+# Costs for different Gemini models, broken down by the type of AI call.
+# This allows for more accurate per-row cost tracking based on the actual operations performed.
+# Estimates are based on typical prompt sizes for each task.
+# 'utility' = small prompt (e.g., aggregator removal)
+# 'verification' = medium prompt (e.g., website content check)
+# 'analysis' = large prompt (e.g., analyzing search results)
 GEMINI_MODEL_COSTS = {
-    "gemini-2.5-flash": { "per_request_estimate": (0.001 * 0.30) + (0.001 * 2.50) }, # ~$0.0028
-    "gemini-2.0-flash": { "per_request_estimate": (0.001 * 0.10) + (0.001 * 0.40) }, # ~$0.0005
-    "gemini-1.5-flash": { "per_request_estimate": (0.001 * 0.35) + (0.001 * 0.70) }, # Placeholder, ~$0.00105
-    "gemini-1.0-pro": { "per_request_estimate": 0.002 }, # Generic estimate for pro models
-    # Default for any other flash model that might appear
-    "default_flash": { "per_request_estimate": 0.001 }
+    "gemini-1.5-flash": {
+        "utility": 0.0005,
+        "verification": 0.0010,
+        "analysis": 0.0015,
+        "default": 0.0010
+    },
+    # Defining costs for other potential models as well
+    "gemini-2.0-flash": {
+        "utility": 0.0004,
+        "verification": 0.0008,
+        "analysis": 0.0012,
+        "default": 0.0008
+    },
+    "default_flash": {
+        "utility": 0.0005,
+        "verification": 0.0010,
+        "analysis": 0.0015,
+        "default": 0.0010
+    }
 }
 
 class CostEstimator:
-    """Calculates the estimated cost for a processing job."""
+    """Calculates processing costs with granular, per-operation accuracy."""
 
     @staticmethod
-    def get_model_cost(model_name: str) -> float:
-        """Gets the estimated cost per request for a given Gemini model."""
+    def get_model_cost(model_name: str, call_type: str = "default") -> float:
+        """
+        Gets the estimated cost for a specific type of AI call for a given Gemini model.
+
+        Args:
+            model_name: The name of the Gemini model being used.
+            call_type: The type of call ('utility', 'verification', 'analysis').
+
+        Returns:
+            The cost in USD for that specific operation.
+        """
         if not model_name:
-            return GEMINI_MODEL_COSTS["default_flash"]["per_request_estimate"]
-        for key, costs in GEMINI_MODEL_COSTS.items():
-            if key in model_name:
-                return costs["per_request_estimate"]
-        return GEMINI_MODEL_COSTS["default_flash"]["per_request_estimate"]
+            model_costs = GEMINI_MODEL_COSTS["default_flash"]
+        else:
+            # Find the matching model cost entry
+            model_key_found = None
+            for key in GEMINI_MODEL_COSTS:
+                if key in model_name:
+                    model_key_found = key
+                    break
+            model_costs = GEMINI_MODEL_COSTS.get(model_key_found, GEMINI_MODEL_COSTS["default_flash"])
+
+        # Return the cost for the specific call type, or the default for that model
+        return model_costs.get(call_type, model_costs["default"])
 
     @staticmethod
     def estimate_cost(num_rows: int, mode: str, model_name: Optional[str]) -> float:
         """
-        Estimates the total cost for a given number of rows and processing mode
-        using a simplified "maximum expected" model of 5 API calls per row.
+        Estimates the total cost for a job using a simplified "maximum expected" model.
+        This is for pre-run estimation, not per-row final cost.
         """
         if num_rows <= 0 or not model_name:
             return 0.0
 
-        gemini_cost = CostEstimator.get_model_cost(model_name)
-
-        # Per user request, assume a max of 5 API calls: 1 AI validation + 4 searches.
-        # The 'Enhanced' mode is no longer a factor as the logic is unified.
-        cost_per_row = gemini_cost + (4 * API_COSTS['google_search_per_query'])
+        # For estimation, we assume a worst-case scenario for an average row.
+        # e.g., 1 utility call, 4 searches, 1 analysis, 1 verification
+        cost_per_row = (
+            CostEstimator.get_model_cost(model_name, "utility") +
+            (4 * API_COSTS['google_search_per_query']) +
+            CostEstimator.get_model_cost(model_name, "analysis") +
+            CostEstimator.get_model_cost(model_name, "verification")
+        )
 
         total_cost = num_rows * cost_per_row
         return total_cost
