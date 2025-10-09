@@ -54,8 +54,20 @@ class JobManager:
             self.logger.setLevel(logging.INFO)
 
     def start(self):
-        """Starts the processing job in a new thread."""
-        if self._is_running: return
+        """
+        Validates critical resources and then starts the processing job in a new thread.
+        """
+        if self._is_running:
+            return
+
+        # Pre-flight check for essential files
+        fallback_logo_path = os.path.abspath("data/image_for_logo_scraping_error.png")
+        if not os.path.exists(fallback_logo_path):
+            raise FileNotFoundError(
+                f"Critical resource missing: The fallback logo image was not found at the expected path: {fallback_logo_path}. "
+                "Please ensure this file exists before starting a job."
+            )
+
         self._is_running = True
         thread_settings = copy.deepcopy(self.settings)
         self._thread = threading.Thread(target=self._run, args=(thread_settings,), daemon=True)

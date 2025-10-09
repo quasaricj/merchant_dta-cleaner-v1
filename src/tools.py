@@ -1,13 +1,45 @@
-# pylint: disable=unused-argument
 """
-This module contains placeholder functions for tools that are provided by the
-agent's execution environment. These functions are not meant to be executed directly
-but are required for dependency injection and testing purposes.
+This module provides real, production-ready implementations for tools required
+by the application, such as fetching website content.
 """
+import requests
 
 def view_text_website(url: str) -> str:
     """
-    A placeholder for the 'view_text_website' tool. The agent's environment
-    will intercept calls to this function and execute the actual tool.
+    Fetches the text content of a website using the requests library.
+
+    Args:
+        url: The URL of the website to fetch.
+
+    Returns:
+        The text content of the website, or an empty string if the request
+        fails for any reason (e.g., network error, non-200 status code).
     """
-    raise NotImplementedError("This function is implemented by the agent's environment.")
+    if not url or not url.startswith(('http://', 'https://')):
+        # Add http scheme if it's missing, as requests requires it.
+        url = f"http://{url}"
+
+    try:
+        response = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        # Raise an exception for bad status codes (4xx or 5xx)
+        response.raise_for_status()
+
+        # Check if content type is likely to be HTML/text to avoid downloading large binary files
+        content_type = response.headers.get('content-type', '')
+        if 'text' not in content_type and 'html' not in content_type:
+            return "" # Not a text-based page, return empty
+
+        return response.text
+
+    except requests.exceptions.RequestException as e:
+        # This catches connection errors, timeouts, invalid URLs, and bad status codes.
+        # It re-raises the exception so the calling function can handle it and log
+        # the specific error in the evidence trail.
+        print(f"Could not fetch website content for {url}. Error: {e}")
+        raise
+    except Exception as e:
+        # Catch any other unexpected errors and re-raise them as well.
+        print(f"An unexpected error occurred while fetching {url}: {e}")
+        raise

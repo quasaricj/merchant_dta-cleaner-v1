@@ -133,5 +133,27 @@ class TestJobManager(unittest.TestCase):
 
         MockGoogleApiClient.assert_called_once_with(self.api_config, model_name="models/gemini-test-model")
 
+    def test_start_fails_if_fallback_logo_is_missing(self):
+        """Test that the job start is aborted if the fallback logo is missing."""
+        fallback_path = os.path.abspath("data/image_for_logo_scraping_error.png")
+        temp_path = f"{fallback_path}.bak"
+
+        # Ensure the file exists before we try to rename it
+        if not os.path.exists(fallback_path):
+            with open(fallback_path, "w") as f:
+                f.write("dummy")
+
+        os.rename(fallback_path, temp_path)
+
+        try:
+            manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
+            with self.assertRaises(FileNotFoundError) as cm:
+                manager.start()
+            self.assertIn("Critical resource missing", str(cm.exception))
+        finally:
+            # Always restore the file
+            os.rename(temp_path, fallback_path)
+
+
 if __name__ == '__main__':
     unittest.main()
