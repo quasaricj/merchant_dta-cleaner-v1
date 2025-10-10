@@ -15,6 +15,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from src.core.data_model import ApiConfig
+from src.services.api_util import retry_with_backoff
 
 
 class GoogleApiClient:
@@ -35,12 +36,42 @@ class GoogleApiClient:
                     self.gemini_model = genai.GenerativeModel(model_name)
             except Exception as e:
                 print(f"Error configuring Gemini API: {e}")
+                # So that validate_api_keys can catch it
+                self.gemini_model = None
 
         if self.api_config.search_api_key:
             try:
                 self.search_service = build("customsearch", "v1", developerKey=self.api_config.search_api_key)
             except HttpError as e:
                 print(f"Error configuring Search API: {e}")
+                # So that validate_api_keys can catch it
+                self.search_service = None
+
+    def validate_api_keys(self) -> bool:
+        """
+        Performs lightweight checks to validate that the configured API keys are working.
+        Raises ConnectionError on failure.
+        """
+        if self.gemini_model:
+            try:
+                # A simple, low-cost way to check the Gemini key
+                self.gemini_model.count_tokens("test")
+            except Exception as e:
+                raise ConnectionError(f"Gemini API key appears to be invalid or expired. Error: {e}")
+
+        if self.search_service:
+            try:
+                # A simple, no-cost way to check the Search key setup
+                self.search_service.cse().list(q="test", cx=self.api_config.search_cse_id, num=1).execute()
+            except HttpError as e:
+                # Specifically check for 400/403 which often indicate key/config issues
+                if e.resp.status in [400, 403]:
+                     raise ConnectionError(f"Google Search API key or CSE ID appears to be invalid. Error: {e}")
+                raise # Re-raise other HTTP errors
+            except Exception as e:
+                raise ConnectionError(f"An unexpected error occurred while validating the Google Search API. Error: {e}")
+        return True
+
 
     @staticmethod
     def validate_and_list_models(api_key: str) -> Optional[List[str]]:
@@ -62,6 +93,7 @@ class GoogleApiClient:
             print(f"An unexpected error occurred during model listing: {e}")
             return None
 
+    @retry_with_backoff()
     def remove_aggregators(self, raw_name: str) -> Dict[str, Any]:
         """
         Uses a targeted AI prompt to identify and remove payment aggregator prefixes
@@ -103,6 +135,7 @@ class GoogleApiClient:
             # Fallback to returning the original name if AI fails
             return {"cleaned_name": raw_name, "removal_reason": f"AI processing failed: {e}"}
 
+    @retry_with_backoff()
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
         """Performs a web search using the Google Custom Search API."""
         if not self.search_service or not self.api_config.search_cse_id:
@@ -118,6 +151,7 @@ class GoogleApiClient:
             print(f"Error during Google Search for '{query}': {e}")
             return None
 
+    @retry_with_backoff()
     def find_place(self, query: str) -> Optional[Dict[str, Any]]:
         """Performs a Text Search using the Google Places API."""
         if not self.api_config.places_api_key:
@@ -133,6 +167,7 @@ class GoogleApiClient:
             print(f"Error during Google Places API call for '{query}': {e}")
             return None
 
+    @retry_with_backoff()
     def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str) -> Optional[Dict[str, Any]]:
         """
         Uses an AI prompt to analyze search results and extract candidate information.
@@ -203,6 +238,7 @@ class GoogleApiClient:
             print(f"An unexpected error occurred during AI analysis for '{cleaned_name}': {e}")
             return None
 
+    @retry_with_backoff()
     def verify_website_with_ai(self, website_content: str, merchant_name: str) -> Optional[Dict[str, Any]]:
         """
         Uses the AI model to analyze the raw text content of a website to determine

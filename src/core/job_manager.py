@@ -55,18 +55,42 @@ class JobManager:
 
     def start(self):
         """
-        Validates critical resources and then starts the processing job in a new thread.
+        Performs comprehensive pre-flight checks and then starts the processing
+        job in a new thread.
         """
         if self._is_running:
             return
 
-        # Pre-flight check for essential files
-        fallback_logo_path = os.path.abspath("data/image_for_logo_scraping_error.png")
-        if not os.path.exists(fallback_logo_path):
-            raise FileNotFoundError(
-                f"Critical resource missing: The fallback logo image was not found at the expected path: {fallback_logo_path}. "
-                "Please ensure this file exists before starting a job."
-            )
+        # --- Pre-flight Checks ---
+        try:
+            # 1. Validate essential files exist
+            fallback_logo_path = os.path.abspath("data/image_for_logo_scraping_error.png")
+            if not os.path.exists(fallback_logo_path):
+                raise FileNotFoundError(f"Fallback logo not found at: {fallback_logo_path}")
+
+            # 2. Validate output directory write permissions
+            output_dir = os.path.dirname(self.settings.output_filepath)
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            test_file = os.path.join(output_dir, f".permission_test_{os.getpid()}")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("test")
+            os.remove(test_file)
+
+            # 3. Validate API keys with a live check
+            self.status_callback(0, 0, "Validating API keys...")
+            temp_api_client = GoogleApiClient(self.api_config, self.settings.model_name)
+            temp_api_client.validate_api_keys()
+            self.status_callback(0, 0, "API keys validated.")
+
+        except FileNotFoundError as e:
+            raise RuntimeError(f"A critical file is missing: {e}") from e
+        except PermissionError as e:
+            raise PermissionError(f"Cannot write to output directory: {output_dir}. Please check permissions.") from e
+        except ConnectionError as e:
+            raise ConnectionError(f"API key validation failed. Please check your keys. Error: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"An unexpected error occurred during pre-flight checks: {e}") from e
 
         self._is_running = True
         thread_settings = copy.deepcopy(self.settings)
@@ -107,8 +131,17 @@ class JobManager:
                     if self._is_stopped: break
                     time.sleep(1)
 
-                record = self._create_record_from_row(row, thread_settings.column_mapping)
-                processed_record = engine.process_record(record)
+                try:
+                    record = self._create_record_from_row(row, thread_settings.column_mapping)
+                    processed_record = engine.process_record(record)
+                except Exception as row_error:
+                    self.logger.error(f"Failed to process row {i + 2}. Error: {row_error}", exc_info=True)
+                    # Create a "failed" record to preserve original data and mark the error
+                    processed_record = self._create_record_from_row(row, thread_settings.column_mapping)
+                    processed_record.remarks = f"FATAL_ERROR: {row_error}"
+                    processed_record.evidence = f"The row could not be processed after multiple retries. Final error: {row_error}"
+                    processed_record.cleaned_merchant_name = "" # Ensure cleaned fields are blank on failure
+
                 with self._lock:
                     self.processed_records.append(processed_record)
 

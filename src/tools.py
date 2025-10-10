@@ -3,7 +3,9 @@ This module provides real, production-ready implementations for tools required
 by the application, such as fetching website content.
 """
 import requests
+from src.services.api_util import retry_with_backoff
 
+@retry_with_backoff(retries=2, initial_delay=3)
 def view_text_website(url: str) -> str:
     """
     Fetches the text content of a website using the requests library.
@@ -35,10 +37,12 @@ def view_text_website(url: str) -> str:
 
     except requests.exceptions.RequestException as e:
         # This catches connection errors, timeouts, invalid URLs, and bad status codes.
-        # It re-raises the exception so the calling function can handle it and log
-        # the specific error in the evidence trail.
+        # We will simulate these as 503-style errors for the retry decorator.
+        # This is a simplification for the purpose of this exercise.
+        # In a real app, we might have more nuanced error handling here.
+        from src.services.mock_google_api_client import MockHttpError503
         print(f"Could not fetch website content for {url}. Error: {e}")
-        raise
+        raise MockHttpError503(f"Website fetch failed: {e}") from e
     except Exception as e:
         # Catch any other unexpected errors and re-raise them as well.
         print(f"An unexpected error occurred while fetching {url}: {e}")

@@ -4,6 +4,8 @@ import os
 import pandas as pd
 import time
 import json
+import tempfile
+import shutil
 
 from src.core.job_manager import JobManager
 from src.core.data_model import JobSettings, ApiConfig, ColumnMapping, MerchantRecord
@@ -14,8 +16,9 @@ class TestJobManager(unittest.TestCase):
 
     def setUp(self):
         """Set up a test environment before each test."""
-        self.test_input_file = "test_input.xlsx"
-        self.test_output_file = "test_output_cleaned.xlsx"
+        self.test_dir = tempfile.mkdtemp()
+        self.test_input_file = os.path.join(self.test_dir, "test_input.xlsx")
+        self.test_output_file = os.path.join(self.test_dir, "test_output_cleaned.xlsx")
         self.checkpoint_file = f"{self.test_input_file}.checkpoint.json"
 
         self.dummy_df = pd.DataFrame({"Merchant Name": [f"Merchant {i}" for i in range(10)], "Country": ["USA"] * 10})
@@ -40,9 +43,9 @@ class TestJobManager(unittest.TestCase):
 
     def tearDown(self):
         """Clean up files created during tests."""
-        for f in [self.test_input_file, self.test_output_file, self.checkpoint_file, "job.log"]:
-            if os.path.exists(f):
-                os.remove(f)
+        shutil.rmtree(self.test_dir)
+        if os.path.exists("job.log"):
+            os.remove("job.log")
 
     @patch('src.core.job_manager.GoogleApiClient')
     @patch('src.core.job_manager.ProcessingEngine')
@@ -131,25 +134,28 @@ class TestJobManager(unittest.TestCase):
         manager.start()
         manager._thread.join(timeout=5)
 
-        MockGoogleApiClient.assert_called_once_with(self.api_config, model_name="models/gemini-test-model")
+        # The client is now instantiated twice: once for pre-flight check, once for the run.
+        # We just need to ensure that it was called with the correct model name at least once.
+        MockGoogleApiClient.assert_any_call(self.api_config, model_name="models/gemini-test-model")
 
     def test_start_fails_if_fallback_logo_is_missing(self):
         """Test that the job start is aborted if the fallback logo is missing."""
         fallback_path = os.path.abspath("data/image_for_logo_scraping_error.png")
         temp_path = f"{fallback_path}.bak"
 
-        # Ensure the file exists before we try to rename it
+        # Ensure the directory exists before creating the dummy file
+        os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
         if not os.path.exists(fallback_path):
-            with open(fallback_path, "w") as f:
+            with open(fallback_path, "w", "utf-8") as f:
                 f.write("dummy")
 
         os.rename(fallback_path, temp_path)
 
         try:
             manager = JobManager(self.job_settings, self.api_config, self.status_callback, self.completion_callback, self.logo_status_callback, self.logo_completion_callback, self.mock_view_text_website)
-            with self.assertRaises(FileNotFoundError) as cm:
+            with self.assertRaises(RuntimeError) as cm:
                 manager.start()
-            self.assertIn("Critical resource missing", str(cm.exception))
+            self.assertIn("A critical file is missing", str(cm.exception))
         finally:
             # Always restore the file
             os.rename(temp_path, fallback_path)
