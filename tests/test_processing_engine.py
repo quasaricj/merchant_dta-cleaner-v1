@@ -256,7 +256,8 @@ class TestProcessingEngine(unittest.TestCase):
         result = self.engine.process_record(record)
 
         # Assert
-        mock_requests_get.assert_called_once_with("http://failing-site.com", timeout=10, headers=unittest.mock.ANY)
+        # With the new retry logic, the failed fetch will be attempted 3 times (1 initial + 2 retries)
+        self.assertEqual(mock_requests_get.call_count, 3, "The failing request should be retried.")
         self.assertEqual(result.website, "", "Website should be blank after fetch failure")
         self.assertIn("http://facebook.com/fallback", result.socials, "Should have fallen back to social media")
         self.assertIn("Website 'http://failing-site.com' rejected.", result.evidence, "Evidence should show rejection")
