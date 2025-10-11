@@ -79,3 +79,4 @@ class JobSettings:
     model_name: Optional[str] = None
     budget_per_row: float = 3.0
     output_columns: List[OutputColumnConfig] = field(default_factory=get_default_output_columns)
+    mock_mode: bool = False

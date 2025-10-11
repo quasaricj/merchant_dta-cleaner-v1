@@ -11,6 +11,8 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, List
+import logging
+import threading
 
 import openpyxl
 
@@ -79,9 +81,12 @@ class MainWindow(tk.Tk):
         self.logo_progress_frame: ttk.Frame
         self.logo_progress_bar: ttk.Progressbar
         self.logo_status_label: ttk.Label
+        self.validation_progress_bar: ttk.Progressbar
         self.start_button_tooltip: Optional[Tooltip] = None
         self.available_models: List[str] = []
         self.api_keys_validated = False
+        self.mock_mode = tk.BooleanVar(value=False)
+        self.logger = logging.getLogger(__name__)
         self.create_menu()
         self.create_widgets()
         self.check_api_keys()
@@ -100,6 +105,10 @@ class MainWindow(tk.Tk):
         # Bottom frame for progress bar and controls
         progress_frame = ttk.LabelFrame(root_frame, text="Job Progress", padding="10")
         progress_frame.pack(side="bottom", fill="x", pady=10)
+
+        # API Validation progress bar (initially hidden)
+        self.validation_progress_bar = ttk.Progressbar(progress_frame, mode='indeterminate')
+
         self.progress_monitor = ProgressMonitor(progress_frame, self.pause_job, self.resume_job, self.stop_job, self._run_diagnostics)
         self.progress_monitor.pack(fill='x', expand=True)
 
@@ -148,18 +157,54 @@ class MainWindow(tk.Tk):
         controls_frame = ttk.LabelFrame(parent, text="Step 5: Configure and Run", padding="10")
         controls_frame.pack(fill="x", pady=10)
         controls_frame.columnconfigure(1, weight=1)
-        ttk.Label(controls_frame, text="Processing Mode:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+
+        mock_mode_check = ttk.Checkbutton(
+            controls_frame,
+            text="Enable Mock/Data-Only Mode (No External API)",
+            variable=self.mock_mode,
+            command=self._on_mock_mode_toggle
+        )
+        mock_mode_check.grid(row=0, column=0, columnspan=2, sticky='w', padx=5, pady=(0, 10))
+
+        ttk.Label(controls_frame, text="Processing Mode:").grid(row=1, column=0, sticky='w', padx=5, pady=2)
         self.mode_selector = ModeSelector(controls_frame, on_mode_change=self.handle_mode_change)
-        self.mode_selector.grid(row=0, column=1, sticky='w', padx=5)
-        ttk.Label(controls_frame, text="AI Model:").grid(row=1, column=0, sticky='w', padx=5, pady=2)
+        self.mode_selector.grid(row=1, column=1, sticky='w', padx=5)
+        ttk.Label(controls_frame, text="AI Model:").grid(row=2, column=0, sticky='w', padx=5, pady=2)
         self.model_selector = ttk.Combobox(controls_frame, state="disabled", values=[])
-        self.model_selector.grid(row=1, column=1, sticky='ew', padx=5)
+        self.model_selector.grid(row=2, column=1, sticky='ew', padx=5)
         self.model_selector.bind("<<ComboboxSelected>>", self._on_model_select)
         self.cost_label = ttk.Label(controls_frame, text="Estimated Cost: $0.00", font=("Arial", 10, "italic"))
-        self.cost_label.grid(row=2, column=0, columnspan=2, pady=5)
+        self.cost_label.grid(row=3, column=0, columnspan=2, pady=5)
         self.start_button = ttk.Button(controls_frame, text="Start Processing", command=self.start_processing, state="disabled")
-        self.start_button.grid(row=3, column=0, columnspan=2, pady=10, ipadx=10, ipady=5)
+        self.start_button.grid(row=4, column=0, columnspan=2, pady=10, ipadx=10, ipady=5)
         self.start_button_tooltip = Tooltip(self.start_button, "Please configure API keys and select a file to enable.")
+
+    def _on_mock_mode_toggle(self):
+        """Handles the logic when the mock mode checkbox is toggled."""
+        if self.mock_mode.get():
+            # Entering mock mode
+            self.api_keys_validated = True  # Pretend keys are valid
+            self.available_models = ["mock-model-v1", "mock-model-v2"]
+            model_display_list = [f"{m} (~$0.0000/req)" for m in self.available_models]
+            self.model_selector.config(values=model_display_list, state="readonly")
+            self.model_selector.set(model_display_list[0])
+            if self.job_settings:
+                self.job_settings.model_name = self.available_models[0]
+            self.cost_label.config(text="Est. Max Cost: $0.00 total ($0.0000/row) - MOCK MODE")
+            messagebox.showinfo("Mock Mode Enabled", "Mock mode is now active. No real API calls will be made.")
+        else:
+            # Exiting mock mode
+            self.api_keys_validated = False
+            self.available_models = []
+            self.model_selector.config(values=[], state="disabled")
+            self.model_selector.set("")
+            if self.job_settings:
+                self.job_settings.model_name = ""
+            self.cost_label.config(text="Estimated Cost: $0.00")
+            # Re-validate real keys
+            self.check_api_keys()
+
+        self.validate_for_processing()
 
     def _on_model_select(self, event=None):
         if self.job_settings: self.job_settings.model_name = self.model_selector.get().split(" ")[0]
@@ -225,9 +270,13 @@ class MainWindow(tk.Tk):
         self.cost_label.config(foreground="red" if is_over_budget else "black")
 
     def validate_for_processing(self):
-        is_ready = self.api_keys_validated and self.job_settings and self.job_settings.output_filepath and self.job_settings.column_mapping.merchant_name and self.job_settings.column_mapping.merchant_name != "<not_mapped>" and self.job_settings.model_name
+        is_mock_mode = self.mock_mode.get()
+        # In mock mode, we don't need to check for API key validation.
+        keys_ok = self.api_keys_validated or is_mock_mode
+
+        is_ready = keys_ok and self.job_settings and self.job_settings.output_filepath and self.job_settings.column_mapping.merchant_name and self.job_settings.column_mapping.merchant_name != "<not_mapped>" and self.job_settings.model_name
         tooltip_text = ""
-        if not self.api_keys_validated: tooltip_text = "API Keys are not validated. Please configure them in Settings."
+        if not keys_ok: tooltip_text = "API Keys are not validated. Please configure them in Settings or enable Mock Mode."
         elif not self.job_settings: tooltip_text = "Please select an input file."
         elif not self.job_settings.output_filepath: tooltip_text = "Please specify an output file path."
         elif not self.job_settings.column_mapping.merchant_name or self.job_settings.column_mapping.merchant_name == "<not_mapped>": tooltip_text = "Please map the 'Merchant Name (mandatory)' column."
@@ -238,8 +287,17 @@ class MainWindow(tk.Tk):
 
     def start_processing(self):
         if not self.job_settings: messagebox.showerror("Error", "Job settings are not configured."); return
-        if not self.api_keys_validated: messagebox.showerror("API Keys Invalid", "Please configure and validate your API keys via the Settings > API Keys menu."); self.open_api_key_dialog(); return
-        if not self.job_settings.model_name: messagebox.showerror("Model Not Selected", "Please select an AI model from the dropdown before starting."); return
+
+        is_mock_mode = self.mock_mode.get()
+        if not is_mock_mode and not self.api_keys_validated:
+             messagebox.showerror("API Keys Invalid", "Please configure and validate your API keys via the Settings > API Keys menu, or enable Mock Mode for offline testing.");
+             self.open_api_key_dialog()
+             return
+        if not self.job_settings.model_name:
+            messagebox.showerror("Model Not Selected", "Please select an AI model from the dropdown before starting."); return
+
+        self.job_settings.mock_mode = is_mock_mode
+
         confirmation_dialog = ConfirmationScreen(self, self.job_settings)
         if not confirmation_dialog.show(): return
         self.toggle_config_widgets(enabled=False)
@@ -397,14 +455,51 @@ class MainWindow(tk.Tk):
         except (IOError, ValueError) as e: self.row_range_selector.disable(); messagebox.showerror("Error Reading File", f"Could not determine file length.\nError: {e}")
 
     def check_api_keys(self):
-        if self.api_config.is_valid(): self._validate_api_and_load_models()
-        else: messagebox.showinfo("API Key Setup", "Welcome! Please enter your API keys to begin."); self.open_api_key_dialog()
+        if self.mock_mode.get():
+            self.logger.info("Starting in Mock Mode. Skipping initial API key validation.")
+            self._on_mock_mode_toggle() # Refresh UI for mock mode
+        elif self.api_config.is_valid():
+            self._start_api_validation_thread()
+        else:
+            if not self.mock_mode.get():
+                 messagebox.showinfo("API Key Setup", "Welcome! Please enter your API keys to begin, or enable Mock Mode for offline testing.")
+                 self.open_api_key_dialog()
 
-    def _validate_api_and_load_models(self):
-        gemini_key = self.api_config.gemini_api_key
-        messagebox.showinfo("Validating", "Validating API Key and fetching available models...", parent=self, icon=messagebox.INFO)
-        self.update_idletasks()
-        models = GoogleApiClient.validate_and_list_models(gemini_key)
+    def _start_api_validation_thread(self):
+        """Starts the API validation process in a background thread."""
+        self.validation_progress_bar.pack(fill='x', expand=True, pady=5)
+        self.validation_progress_bar.start()
+        self.progress_monitor.update_status("Validating API keys...")
+
+        validation_thread = threading.Thread(target=self._validate_api_and_load_models, daemon=True)
+        validation_thread.start()
+
+        # Set a timeout to check if the thread is still alive
+        self.after(30000, self._check_validation_timeout, validation_thread)
+
+    def _check_validation_timeout(self, thread: threading.Thread):
+        """Checks if the validation thread is still running after a timeout."""
+        if thread.is_alive():
+            self.validation_progress_bar.stop()
+            self.validation_progress_bar.pack_forget()
+            self.progress_monitor.reset_to_idle()
+            messagebox.showwarning(
+                "Validation Timeout",
+                "API validation is taking too long. Please check your internet connection and API keys. "
+                "You can also use Mock Mode for offline testing."
+            )
+            self.api_keys_validated = False
+            self.validate_for_processing()
+
+    def _validate_api_and_load_models_complete(self, models: Optional[List[str]]):
+        """
+        This method is called on the main thread with the result from the
+        background validation task.
+        """
+        self.validation_progress_bar.stop()
+        self.validation_progress_bar.pack_forget()
+        self.progress_monitor.reset_to_idle()
+
         if models:
             self.available_models = sorted(models)
             model_display_list = [f"{m} (~${CostEstimator.get_model_cost(m):.4f}/req)" for m in self.available_models]
@@ -417,28 +512,98 @@ class MainWindow(tk.Tk):
             self.api_keys_validated = False
             self.model_selector.config(values=[], state="disabled"); self.model_selector.set("")
             messagebox.showerror("Validation Failed", "The Gemini API Key is invalid or no models could be fetched. Please check your key and internet connection.", parent=self)
+
         self.validate_for_processing()
+
+    def _validate_api_and_load_models(self):
+        """
+        Worker function that runs in a background thread to validate the API key.
+        The result is then passed to the main thread via `after`.
+        """
+        gemini_key = self.api_config.gemini_api_key
+        try:
+            models = GoogleApiClient.validate_and_list_models(gemini_key)
+            self.after(0, self._validate_api_and_load_models_complete, models)
+        except Exception as e:
+            self.logger.error(f"Unhandled exception in API validation thread: {e}", exc_info=True)
+            self.after(0, self._validate_api_and_load_models_complete, None)
 
     def open_api_key_dialog(self):
         dialog = tk.Toplevel(self)
-        dialog.title("API Key Configuration"); dialog.geometry("400x250"); dialog.resizable(False, False)
-        tk.Label(dialog, text="Google Gemini API Key:").pack(pady=5)
-        gemini_entry = tk.Entry(dialog, show='*', width=50); gemini_entry.pack(); gemini_entry.insert(0, self.api_config.gemini_api_key or "")
-        tk.Label(dialog, text="Google Search API Key:").pack(pady=5)
-        search_key_entry = tk.Entry(dialog, show='*', width=50); search_key_entry.pack(); search_key_entry.insert(0, self.api_config.search_api_key or "")
-        tk.Label(dialog, text="Google Search CSE ID:").pack(pady=5)
-        cse_id_entry = tk.Entry(dialog, show='*', width=50); cse_id_entry.pack(); cse_id_entry.insert(0, self.api_config.search_cse_id or "")
-        tk.Label(dialog, text="Google Places API Key (Optional):").pack(pady=5)
-        places_entry = tk.Entry(dialog, show='*', width=50); places_entry.pack(); places_entry.insert(0, self.api_config.places_api_key or "")
+        dialog.title("API Key Configuration")
+        dialog.geometry("550x300")
+        dialog.resizable(False, False)
+
+        main_frame = ttk.Frame(dialog, padding="10")
+        main_frame.pack(fill="both", expand=True)
+
+        def create_key_entry(parent, label_text, key_name, initial_value):
+            frame = ttk.Frame(parent)
+            frame.pack(fill='x', pady=2)
+            ttk.Label(frame, text=label_text, width=25).pack(side='left', anchor='w')
+            entry = ttk.Entry(frame, show='*', width=40)
+            entry.pack(side='left', fill='x', expand=True, padx=5)
+            entry.insert(0, initial_value or "")
+            help_button = ttk.Button(frame, text="?", width=2, command=lambda: self._show_key_help(key_name))
+            help_button.pack(side='left')
+            return entry
+
+        gemini_entry = create_key_entry(main_frame, "Google Gemini API Key:", "Gemini", self.api_config.gemini_api_key)
+        search_key_entry = create_key_entry(main_frame, "Google Search API Key:", "Search", self.api_config.search_api_key)
+        cse_id_entry = create_key_entry(main_frame, "Google Search CSE ID:", "Search", self.api_config.search_cse_id)
+        places_entry = create_key_entry(main_frame, "Google Places API Key (Opt.):", "Places", self.api_config.places_api_key)
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=20)
+
         def save_keys():
-            gemini_key = gemini_entry.get().strip(); search_key = search_key_entry.get().strip(); cse_id = cse_id_entry.get().strip(); places_key = places_entry.get().strip()
+            gemini_key = gemini_entry.get().strip()
+            search_key = search_key_entry.get().strip()
+            cse_id = cse_id_entry.get().strip()
+            places_key = places_entry.get().strip()
+
             if gemini_key and search_key and cse_id:
-                self.api_config = ApiConfig(gemini_key, search_key, cse_id, places_key or None); save_api_config(self.api_config)
+                self.api_config = ApiConfig(gemini_key, search_key, cse_id, places_key or None)
+                save_api_config(self.api_config)
                 dialog.destroy()
-                self._validate_api_and_load_models()
-            else: messagebox.showwarning("Incomplete", "Gemini Key, Search Key, and CSE ID are required.", parent=dialog)
-        save_button = ttk.Button(dialog, text="Save and Validate", command=save_keys); save_button.pack(pady=10)
-        dialog.transient(self); dialog.grab_set(); self.wait_window(dialog)
+                self._start_api_validation_thread()
+            else:
+                messagebox.showwarning("Incomplete", "Gemini Key, Search Key, and CSE ID are required.", parent=dialog)
+
+        save_button = ttk.Button(button_frame, text="Save and Validate", command=save_keys)
+        save_button.pack(side="left", padx=10)
+
+        cancel_button = ttk.Button(button_frame, text="Cancel", command=dialog.destroy)
+        cancel_button.pack(side="left")
+
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+
+    def _show_key_help(self, key_name: str):
+        """Displays a help message for a specific API key."""
+        help_messages = {
+            "Gemini": "To get a Gemini API Key:\n\n"
+                      "1. Go to Google AI Studio: https://aistudio.google.com/\n"
+                      "2. Sign in with your Google account.\n"
+                      "3. Click on 'Get API Key' in the top left corner.\n"
+                      "4. Create a new API key in a new or existing project.\n"
+                      "5. Copy the generated key and paste it here.",
+            "Search": "To get a Google Search API Key and CSE ID:\n\n"
+                      "1. Go to the Google Cloud Console: https://console.cloud.google.com/\n"
+                      "2. Create a new project.\n"
+                      "3. Enable the 'Custom Search API' for your project.\n"
+                      "4. Go to 'Credentials' and create a new 'API Key'. Copy it.\n"
+                      "5. Go to the Programmable Search Engine control panel: https://programmablesearchengine.google.com/controlpanel/all\n"
+                      "6. Create a new search engine. For 'Sites to search', enter 'www.google.com'.\n"
+                      "7. In the search engine settings, find the 'Search engine ID' and copy it.",
+            "Places": "To get a Google Places API Key (Optional):\n\n"
+                      "1. Go to the Google Cloud Console (the same project as your Search API).\n"
+                      "2. Enable the 'Places API' for your project.\n"
+                      "3. Your existing Search API Key should work for Places as well. If not, create a new one."
+        }
+        messagebox.showinfo(f"How to get {key_name} Key", help_messages.get(key_name, "No help available."), parent=self)
+
 
     def _run_diagnostics(self):
         """Runs a series of checks to help the user diagnose a failed job."""
