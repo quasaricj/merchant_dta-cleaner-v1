@@ -6,6 +6,7 @@ web lookups.
 """
 import os
 import json
+import logging
 from typing import Optional, List, Dict, Any
 
 import google.generativeai as genai
@@ -25,6 +26,7 @@ class GoogleApiClient:
         self.api_config = api_config
         self.gemini_model = None
         self.search_service = None
+        self.logger = logging.getLogger(__name__)
         self._configure_clients(model_name)
 
     def _configure_clients(self, model_name: Optional[str]):
@@ -131,7 +133,7 @@ class GoogleApiClient:
             cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
             return json.loads(cleaned_response)
         except Exception as e:
-            print(f"Error during aggregator removal for '{raw_name}': {e}")
+            self.logger.error(f"Error during aggregator removal for '{raw_name}': {e}", exc_info=True)
             # Fallback to returning the original name if AI fails
             return {"cleaned_name": raw_name, "removal_reason": f"AI processing failed: {e}"}
 
@@ -148,7 +150,7 @@ class GoogleApiClient:
             items = res.get('items', [])
             return [{"title": item.get('title'), "link": item.get('link'), "snippet": item.get('snippet')} for item in items]
         except HttpError as e:
-            print(f"Error during Google Search for '{query}': {e}")
+            self.logger.error(f"Error during Google Search for '{query}': {e}", exc_info=True)
             return None
 
     @retry_with_backoff()
@@ -164,7 +166,7 @@ class GoogleApiClient:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"Error during Google Places API call for '{query}': {e}")
+            self.logger.error(f"Error during Google Places API call for '{query}': {e}", exc_info=True)
             return None
 
     @retry_with_backoff()
@@ -232,10 +234,10 @@ class GoogleApiClient:
 
             return json.loads(cleaned_response)
         except (json.JSONDecodeError, TypeError) as e:
-            print(f"Error decoding AI JSON response for '{cleaned_name}': {e}\\nResponse was: {response.text}")
+            self.logger.error(f"Error decoding AI JSON response for '{original_name}': {e}\nResponse was: {response.text}", exc_info=True)
             return None
         except Exception as e:
-            print(f"An unexpected error occurred during AI analysis for '{cleaned_name}': {e}")
+            self.logger.error(f"An unexpected error occurred during AI analysis for '{original_name}': {e}", exc_info=True)
             return None
 
     @retry_with_backoff()
@@ -315,8 +317,8 @@ class GoogleApiClient:
 
             return json.loads(cleaned_response)
         except (json.JSONDecodeError, TypeError) as e:
-            print(f"Error decoding AI JSON response for website verification: {e}\\nResponse was: {response.text}")
-            return {{"is_valid": False, "reasoning": "AI response was not valid JSON."}}
+            self.logger.error(f"Error decoding AI JSON response for website verification: {e}\nResponse was: {response.text}", exc_info=True)
+            return {"is_valid": False, "reasoning": "AI response was not valid JSON."}
         except Exception as e:
-            print(f"An unexpected error occurred during AI website verification: {e}")
-            return {{"is_valid": False, "reasoning": f"An API error occurred: {e}"}}
+            self.logger.error(f"An unexpected error occurred during AI website verification: {e}", exc_info=True)
+            return {"is_valid": False, "reasoning": f"An API error occurred: {e}"}

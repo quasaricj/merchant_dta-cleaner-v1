@@ -19,6 +19,7 @@ from src.core.data_model import (JobSettings, MerchantRecord, ApiConfig,
                                   ColumnMapping, OutputColumnConfig)
 from src.core.processing_engine import ProcessingEngine
 from src.services.google_api_client import GoogleApiClient
+from src.services.mock_google_api_client import MockGoogleApiClient
 from src.core.logo_scraper import LogoScraper
 
 
@@ -77,11 +78,14 @@ class JobManager:
                 f.write("test")
             os.remove(test_file)
 
-            # 3. Validate API keys with a live check
-            self.status_callback(0, 0, "Validating API keys...")
-            temp_api_client = GoogleApiClient(self.api_config, self.settings.model_name)
-            temp_api_client.validate_api_keys()
-            self.status_callback(0, 0, "API keys validated.")
+            # 3. Validate API keys with a live check (skip in mock mode)
+            if not self.settings.mock_mode:
+                self.status_callback(0, 0, "Validating API keys...")
+                temp_api_client = GoogleApiClient(self.api_config, self.settings.model_name)
+                temp_api_client.validate_api_keys()
+                self.status_callback(0, 0, "API keys validated.")
+            else:
+                self.status_callback(0, 0, "Mock Mode: Skipping API key validation.")
 
         except FileNotFoundError as e:
             raise RuntimeError(f"A critical file is missing: {e}") from e
@@ -97,9 +101,15 @@ class JobManager:
         self._thread = threading.Thread(target=self._run, args=(thread_settings,), daemon=True)
         self._thread.start()
 
-    def pause(self): self._is_paused = True
-    def resume(self): self._is_paused = False
-    def stop(self): self._is_stopped = True
+    def pause(self):
+        self.logger.info("Pause command received.")
+        self._is_paused = True
+    def resume(self):
+        self.logger.info("Resume command received.")
+        self._is_paused = False
+    def stop(self):
+        self.logger.info("Stop command received.")
+        self._is_stopped = True
 
     def _run(self, thread_settings: JobSettings):
         """The main processing loop that runs in the background."""
@@ -110,7 +120,11 @@ class JobManager:
             self._load_checkpoint()
 
             self.status_callback(0, 0, "Initializing API clients...")
-            api_client = GoogleApiClient(self.api_config, model_name=thread_settings.model_name)
+            if thread_settings.mock_mode:
+                self.logger.info("MOCK MODE ENABLED. Using MockGoogleApiClient.")
+                api_client = MockGoogleApiClient(self.api_config, model_name=thread_settings.model_name)
+            else:
+                api_client = GoogleApiClient(self.api_config, model_name=thread_settings.model_name)
             engine = ProcessingEngine(thread_settings, api_client, self.view_text_website_func)
 
             self.status_callback(0, 0, "Reading input file...")
