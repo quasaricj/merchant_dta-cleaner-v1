@@ -50,6 +50,19 @@ This guide covers:
 
 ## 4. Troubleshooting
 
+### Startup and Configuration Issues
+
+**Q: The application seems to freeze or get stuck on "Validating API keys..."**
+**A:** This is the most common issue and can be caused by several factors:
+    *   **No Internet Connection:** The app needs to contact Google to validate your keys. Please check your internet connection.
+    *   **Invalid API Key:** If your API key is incorrect, expired, or doesn't have the right permissions, the request may time out.
+    *   **Firewall/VPN:** Your network security might be blocking the connection to Google's API servers.
+
+    **Solutions:**
+    1.  **Wait 30 Seconds:** The application has a 30-second timeout. If it's a network issue, it will eventually show a warning.
+    2.  **Check Your Keys:** Go to `Settings > API Keys` and re-enter your keys. Use the `?` buttons to see instructions on how to get the correct keys.
+    3.  **Use Mock Mode:** If you want to test the application's UI or run it without an internet connection, enable the **"Enable Mock/Data-Only Mode"** checkbox on the main screen. This will skip all API checks and allow you to test the workflow with dummy data.
+
 **Q: I double-clicked `setup_run.py`, but it opened in a text editor.**
 **A:** This usually means Python is not correctly associated with `.py` files. Right-click the file, choose "Open with", and select "Python" from the list. If Python is not in the list, you may need to reinstall it, ensuring you check "Add Python to PATH".
 
@@ -59,8 +72,15 @@ This guide covers:
     *   **Firewall/VPN Issues:** Your network security might be blocking access to the Python package repository. Try running the script on a different network or disabling your VPN temporarily.
     *   **Old Pip Version:** The script attempts to upgrade `pip`, but if your version is very old, it might fail. You can try manually upgrading it by opening a Command Prompt and running: `python -m pip install --upgrade pip`.
 
-**Q: The application launched, but it's showing errors about API keys.**
-**A:** The application requires valid API keys from Google to function. Ensure you have correctly entered your **Gemini API Key** and **Search API Key**. The "Enhanced" mode also requires a **Places API Key**.
+**Q: How do I get the API keys?**
+**A:** In the application, go to `Settings > API Keys`. Next to each input field, there is a `?` button. Click it to get detailed, step-by-step instructions for obtaining that specific key.
+
+### Processing Issues
+
+**Q: The job failed with an error message.**
+**A:**
+1.  **Run Diagnostics:** After a job fails, the "Run Diagnostics" button (a wrench icon) becomes available in the progress area. Click this to get a report on potential issues like internet connectivity, API key status, and file permissions.
+2.  **Check the Log File:** For more detailed information, open the `job.log` file located in the main application folder. This file contains technical details about what went wrong.
 
 **Q: The build process failed when running `create_executable.py`.**
 **A:** Building executables can be complex.
