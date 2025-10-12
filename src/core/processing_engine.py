@@ -25,32 +25,42 @@ class ProcessingEngine:
         self.api_client = api_client
         self.view_text_website = view_text_website_func
 
+    def _is_merchant_name_in_search_item(self, merchant_name: str, item: Dict[str, str]) -> bool:
+        """
+        Checks if the merchant name (or a simplified version) is in the search result's
+        title or snippet. This is the core of the 'Strict Match Mode'.
+        """
+        # Normalize both the merchant name and the search content for a more robust comparison.
+        # This removes punctuation and converts to lower case.
+        normalised_name = re.sub(r'[^\w\s]', '', merchant_name).lower().strip()
+
+        title = item.get('title', '')
+        snippet = item.get('snippet', '')
+
+        normalised_content = re.sub(r'[^\w\s]', '', f"{title} {snippet}").lower()
+
+        # Simple substring check. Can be enhanced with tokenization if needed.
+        return normalised_name in normalised_content
+
     def process_record(self, record: MerchantRecord) -> MerchantRecord:
         """
         Executes the strict 6-step search and validation workflow.
-
-        The process is as follows:
-        1. Pre-process the name to remove aggregators.
-        2. Build the 6 search queries.
-        3. Iterate through each query, performing search and candidate extraction.
-        4. For each website candidate, attempt to verify it via AI.
-        5. If a website is successfully verified, the search halts immediately.
-        6. If no website is found after all 6 queries, the best social media link is used.
-        7. Final business rules are applied and evidence is generated.
         """
-        # Step 1: Pre-process name to remove aggregators
+        # Step 1: Pre-process name
         aggregator_result = self._remove_aggregators(record)
         aggregator_reason = aggregator_result.get("removal_reason", "No aggregator check performed.")
         cleaned_name_for_search = aggregator_result.get("cleaned_name", record.original_name)
 
-        # Initialize variables to store results across the search loop
+        # Initialize variables
         validated_website = None
         final_analysis = None
         best_social_candidate = None
         all_social_candidates = []
         evidence_trail = [f"Aggregator Check: {aggregator_reason}"]
+        if self.settings.strict_match:
+            evidence_trail.append("STRICT MATCH MODE ENABLED: Will only consider search results with explicit name match.")
 
-        # Step 2: Build the search queries
+        # Step 2: Build queries
         queries = self._build_search_queries(cleaned_name_for_search, record)
 
         # Step 3 & 4: The main search-and-verify loop
@@ -62,6 +72,15 @@ class ProcessingEngine:
                 evidence_trail.append(" -> No web results found.")
                 continue
 
+            # --- Strict Match Logic ---
+            if self.settings.strict_match:
+                original_results_count = len(search_results)
+                search_results = [item for item in search_results if self._is_merchant_name_in_search_item(cleaned_name_for_search, item)]
+                evidence_trail.append(f" -> Strict match filtering: {len(search_results)} of {original_results_count} results passed.")
+                if not search_results:
+                    continue # Skip to the next query if no results pass the strict filter
+
+            # --- AI Analysis (on filtered or all results) ---
             analysis = self.api_client.analyze_search_results(search_results, record.original_name, query)
             if self.settings.model_name:
                 record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "analysis")
@@ -69,27 +88,24 @@ class ProcessingEngine:
                 evidence_trail.append(" -> AI analysis of results failed.")
                 continue
 
-            # Store the latest analysis in case we need it for a social-only result
             final_analysis = analysis
             evidence_trail.append(f" -> AI Summary: '{analysis.get('extraction_summary', 'N/A')}'")
-
-            # Collect all social media candidates opportunistically
             all_social_candidates.extend(analysis.get("social_media_candidates", []))
 
-            # Step 5: Attempt to validate website candidates from this query
+            # Step 5: Validate website candidates
             website_candidates = analysis.get("website_candidates", [])
             for website_url in website_candidates:
                 verification = self._verify_website_url(website_url, record)
                 if verification and verification.get("is_valid"):
                     validated_website = website_url
                     evidence_trail.append(f" -> SUCCESS: Website '{website_url}' verified. Reason: {verification.get('reasoning')}. Halting search.")
-                    break  # Exit the inner loop over website_candidates
+                    break
                 else:
                     reason = verification.get('reasoning', 'Verification failed')
                     evidence_trail.append(f" -> Website '{website_url}' rejected. Reason: {reason}.")
 
             if validated_website:
-                break # A valid website was found, so exit the main loop over queries
+                break
 
         # Step 6 & 7: Apply final business rules and generate evidence
         # Prioritize rejecting closed businesses based on the last available analysis

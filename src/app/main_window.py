@@ -86,6 +86,7 @@ class MainWindow(tk.Tk):
         self.available_models: List[str] = []
         self.api_keys_validated = False
         self.mock_mode = tk.BooleanVar(value=False)
+        self.strict_match_mode = tk.BooleanVar(value=False)
         self.logger = logging.getLogger(__name__)
         self.create_menu()
         self.create_widgets()
@@ -158,13 +159,26 @@ class MainWindow(tk.Tk):
         controls_frame.pack(fill="x", pady=10)
         controls_frame.columnconfigure(1, weight=1)
 
+        option_checkboxes_frame = ttk.Frame(controls_frame)
+        option_checkboxes_frame.grid(row=0, column=0, columnspan=2, sticky='w', padx=5, pady=(0, 10))
+
         mock_mode_check = ttk.Checkbutton(
-            controls_frame,
+            option_checkboxes_frame,
             text="Enable Mock/Data-Only Mode (No External API)",
             variable=self.mock_mode,
             command=self._on_mock_mode_toggle
         )
-        mock_mode_check.grid(row=0, column=0, columnspan=2, sticky='w', padx=5, pady=(0, 10))
+        mock_mode_check.pack(side="left", anchor="w")
+
+        strict_match_check = ttk.Checkbutton(
+            option_checkboxes_frame,
+            text="Enable Strict Match Mode",
+            variable=self.strict_match_mode,
+            command=self._on_strict_match_toggle
+        )
+        strict_match_check.pack(side="left", anchor="w", padx=(20, 0))
+        Tooltip(strict_match_check, "If checked, only accepts search results where the merchant name is explicitly found in the title or snippet. Default (unchecked) relies on AI analysis of all results.")
+
 
         ttk.Label(controls_frame, text="Processing Mode:").grid(row=1, column=0, sticky='w', padx=5, pady=2)
         self.mode_selector = ModeSelector(controls_frame, on_mode_change=self.handle_mode_change)
@@ -210,6 +224,13 @@ class MainWindow(tk.Tk):
         if self.job_settings: self.job_settings.model_name = self.model_selector.get().split(" ")[0]
         self.validate_for_processing()
         self.update_cost_estimate()
+
+    def _on_strict_match_toggle(self):
+        """Handles the logic when the strict match checkbox is toggled."""
+        if self.job_settings:
+            self.job_settings.strict_match = self.strict_match_mode.get()
+        # No other UI changes are needed, but we could add logging or updates here if necessary.
+        self.logger.info(f"Strict Match Mode toggled to: {self.strict_match_mode.get()}")
 
     def handle_file_selection(self, filepath: str):
         self.reset_ui_for_new_file()
@@ -297,6 +318,7 @@ class MainWindow(tk.Tk):
             messagebox.showerror("Model Not Selected", "Please select an AI model from the dropdown before starting."); return
 
         self.job_settings.mock_mode = is_mock_mode
+        self.job_settings.strict_match = self.strict_match_mode.get()
 
         confirmation_dialog = ConfirmationScreen(self, self.job_settings)
         if not confirmation_dialog.show(): return

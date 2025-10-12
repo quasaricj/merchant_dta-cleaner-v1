@@ -242,42 +242,41 @@ class JobManager:
 
     def _write_output_file(self, original_df: pd.DataFrame):
         """
-        Writes the final results to an Excel file by merging the processed data
-        back into the original full DataFrame, preserving all rows.
+        Writes the final results to an Excel file. It takes the slice of the original
+        dataframe for the processed range, preserves all its columns, and then adds the
+        newly generated columns from the processed records.
         """
         with self._lock:
             if not self.processed_records:
                 self.logger.warning("No records were processed, output file will not be written.")
-                try:
-                    original_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
-                    self.logger.info(f"Wrote original data to {self.settings.output_filepath} as no rows were processed.")
-                except (IOError, PermissionError) as e:
-                     raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Error: {e}")
                 return
 
-            final_df = original_df.copy()
-            processed_df = pd.DataFrame([asdict(r) for r in self.processed_records])
+            # Create a DataFrame from the processed records
+            processed_df = pd.DataFrame([asdict(r) for r in self.processed_records]).reset_index(drop=True)
+
+            # Select the slice of the original dataframe that corresponds to the processed rows
             start_index = self.settings.start_row - 2
+            # Recalculate end_index based on actual number of rows processed, in case of early stop
+            end_index = start_index + len(processed_df)
+            output_df = original_df.iloc[start_index:end_index].reset_index(drop=True)
 
+            # Add the new/updated columns from the processing results to the output dataframe
             for col_config in self.settings.output_columns:
-                if col_config.enabled and col_config.output_header not in final_df.columns:
-                    final_df[col_config.output_header] = pd.NA
+                if col_config.enabled:
+                    # Ensure the source field exists in the processed_df to avoid KeyErrors
+                    if col_config.source_field in processed_df.columns:
+                        source_values = processed_df[col_config.source_field].apply(
+                            lambda x: ', '.join(filter(None, x)) if isinstance(x, list) else x
+                        )
+                        # This will add the column if new, or overwrite it if it exists (e.g. user maps output to an existing column)
+                        output_df[col_config.output_header] = source_values.values
+                    else:
+                        self.logger.warning(f"Source field '{col_config.source_field}' not found in processed data. Skipping column '{col_config.output_header}'.")
 
-            for i, processed_row in processed_df.iterrows():
-                target_idx = start_index + i
-                if target_idx >= len(final_df):
-                    continue
-
-                for col_config in self.settings.output_columns:
-                    if col_config.enabled:
-                        source_value = getattr(processed_row, col_config.source_field, pd.NA)
-                        if isinstance(source_value, list):
-                            source_value = ', '.join(filter(None, source_value))
-                        final_df.loc[target_idx, col_config.output_header] = source_value
 
         try:
-            final_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
-            self.logger.info(f"Successfully wrote output to {self.settings.output_filepath}")
+            output_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
+            self.logger.info(f"Successfully wrote {len(output_df)} processed rows to {self.settings.output_filepath}")
         except (IOError, PermissionError) as e:
             raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Check permissions. Original error: {e}")
 

@@ -196,16 +196,11 @@ class GoogleApiClient:
         ---
 
         **EXTRACTION RULES:**
-        1.  **`cleaned_merchant_name`**: Extract the most likely official business name. Capitalize it properly (e.g., "Clean Juice"). If it's a franchise (e.g., "KFC New Delhi"), extract the main brand ("KFC"). If multiple names are plausible, choose the one that appears most frequently or officially in the results.
-        2.  **`website_candidates`**: Extract ALL potential official website URLs.
-            - A website URL is NOT a social media page (facebook.com, instagram.com).
-            - A website URL is NOT a page from an aggregator or directory (yelp.com, tripadvisor.com).
-            - List all unique, plausible URLs.
+        1.  **`cleaned_merchant_name`**: Extract the most likely official business name. Capitalize it properly (e.g., "Clean Juice"). If it's a franchise (e.g., "KFC New Delhi"), extract the main brand ("KFC"). If multiple names are plausible, choose the one that appears most officially.
+        2.  **`website_candidates`**: Extract ALL potential official website URLs. Do NOT include social media (facebook.com, etc.) or directory (yelp.com, etc.) links.
         3.  **`social_media_candidates`**: Extract ALL potential official social media profile URLs (Facebook, Instagram, LinkedIn, etc.).
-            - A profile must look like a business page, not a personal one.
-            - List all unique, plausible URLs.
         4.  **`business_status`**: Based on the snippets, determine the most likely status: "Operational", "Permanently Closed", "Uncertain".
-        5.  **`extraction_summary`**: Briefly explain your findings. For example: "Found a likely business name and two potential websites. One social media link was also identified from the search results." Do not try to make a final conclusion.
+        5.  **`extraction_summary`**: Briefly explain your findings and **explicitly quote the text from the search result snippet that justifies your `cleaned_merchant_name` choice.** For example: "Based on 'Snippet: Welcome to the official page for Clean Juice...', the name appears to be Clean Juice."
 
         **FINAL JSON OUTPUT STRUCTURE (Strict):**
         Return a single JSON object. Do not deviate from this structure. If nothing is found for a field, use an empty string or an empty list.

@@ -61,8 +61,15 @@ This is the final step before processing begins.
 -   **Processing Mode:**
     -   **Basic:** Uses AI and standard Google Search. This is faster and lower cost.
     -   **Enhanced:** Adds the Google Places API for business verification. This provides higher accuracy but is slower and costs more.
+-   **Matching Logic:**
+    -   **Default (Recommended):** By default, the tool relies on the AI's analysis of search results. The AI is designed to understand context, including franchise variations and slight name differences. Its decisions are documented in the `Evidence` column, where it must quote the text from the search result that supports its conclusion.
+    -   **Strict Match Mode (Optional):** An optional checkbox is available to enable "Strict Match Mode." If you check this box, the application will use a more rigid, programmatic check. It will **only** consider a search result valid if the merchant's name is explicitly found in the result's title or description snippet. This mode can prevent ambiguous matches but may also reject valid results that require contextual understanding.
 -   **Estimated Cost:** A real-time cost estimate is displayed based on the number of rows and the processing mode you have selected. If the cost is likely to exceed the budget (₹3.00/row), a warning will be shown.
 -   **Start Processing:** Once the "Merchant Name" column is mapped, the **"Start Processing"** button will become active. Click it to proceed.
+
+### A Note on How Results are Found
+
+The app will only output results when a headline search evidence match is found. Otherwise, the output is left blank and a detailed explanation is in the evidence field. This ensures that you can trust the data in the output file, as every result is backed by a clear audit trail.
 
 ### Final Confirmation
 
