@@ -70,13 +70,16 @@ class MockGoogleApiClient:
         return True
 
     @retry_with_backoff()
-    def remove_aggregators(self, raw_name: str) -> Dict[str, Any]:
+    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Dict[str, Any]:
         """Mocks the aggregator removal AI call."""
         self._api_request_handler("gemini")
+        prompt = "mock aggregator prompt"
         # Return a predictable, cleaned-up response
         if "PAYPAL *" in raw_name:
-            return {"cleaned_name": raw_name.replace("PAYPAL *", "").strip(), "removal_reason": "Removed 'PAYPAL *' prefix."}
-        return {"cleaned_name": raw_name, "removal_reason": "No aggregator found."}
+            result = {"cleaned_name": raw_name.replace("PAYPAL *", "").strip(), "removal_reason": "Removed 'PAYPAL *' prefix."}
+        else:
+            result = {"cleaned_name": raw_name, "removal_reason": "No aggregator found."}
+        return (result, prompt) if return_prompt else result
 
     @retry_with_backoff()
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
@@ -90,32 +93,35 @@ class MockGoogleApiClient:
         }]
 
     @retry_with_backoff()
-    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str) -> Optional[Dict[str, Any]]:
+    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
         """Mocks the AI analysis of search results."""
+        self._api_request_handler("gemini")
+        prompt = "mock analysis prompt"
         # --- Special case for stress testing row-level failure ---
         if "FORCE_FAIL_MERCHANT" in original_name:
-            # This will cause the retry decorator to give up and raise the exception
             raise MockQuotaExceededError("This is a forced, non-retriable error for testing.")
 
-        self._api_request_handler("gemini")
         # Return a predictable analysis based on mock search results
-        return {
+        result = {
           "cleaned_merchant_name": original_name.title(),
           "website_candidates": [res['link'] for res in search_results if 'example.com' in res['link']],
           "social_media_candidates": ["https://facebook.com/example"],
           "business_status": "Operational",
-          "extraction_summary": "Found a likely business name and one potential website."
+          "supporting_evidence": "Found official site in search results."
         }
+        return (result, prompt) if return_prompt else result
 
     @retry_with_backoff()
-    def verify_website_with_ai(self, website_content: str, merchant_name: str) -> Optional[Dict[str, Any]]:
+    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
         """Mocks the AI verification of website content."""
         self._api_request_handler("gemini")
+        prompt = "mock verification prompt"
         # Return a successful verification by default
-        return {
+        result = {
           "is_valid": True,
           "reasoning": "The website appears to be a legitimate and operational business page."
         }
+        return (result, prompt) if return_prompt else result
 
     # --- Utility methods for testing ---
     def reset_counters(self):

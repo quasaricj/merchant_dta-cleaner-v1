@@ -62,16 +62,25 @@ class ProcessingEngine:
                 evidence_trail.append(" -> No web results found.")
                 continue
 
-            analysis = self.api_client.analyze_search_results(search_results, record.original_name, query)
+            analysis, analysis_prompt = self.api_client.analyze_search_results(search_results, record.original_name, query, return_prompt=True)
             if self.settings.model_name:
-                record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "analysis")
+                input_tokens = cost_estimator.CostEstimator.count_tokens(analysis_prompt)
+                output_tokens = cost_estimator.CostEstimator.count_tokens(str(analysis))
+                record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
+
             if not analysis:
                 evidence_trail.append(" -> AI analysis of results failed.")
                 continue
 
-            # Store the latest analysis in case we need it for a social-only result
+            supporting_evidence = analysis.get("supporting_evidence", "N/A")
+            evidence_trail.append(f" -> AI Supporting Evidence: '{supporting_evidence}'")
+
+            # Core business rule: Only proceed if the AI found a name based on the evidence.
+            if not analysis.get("cleaned_merchant_name"):
+                evidence_trail.append(" -> No merchant name found by AI in this result. Skipping.")
+                continue
+
             final_analysis = analysis
-            evidence_trail.append(f" -> AI Summary: '{analysis.get('extraction_summary', 'N/A')}'")
 
             # Collect all social media candidates opportunistically
             all_social_candidates.extend(analysis.get("social_media_candidates", []))
@@ -119,9 +128,11 @@ class ProcessingEngine:
         if not record.original_name or not isinstance(record.original_name, str):
             return {"cleaned_name": "", "removal_reason": "Original name is empty or invalid."}
 
-        aggregator_result = self.api_client.remove_aggregators(record.original_name)
+        aggregator_result, prompt = self.api_client.remove_aggregators(record.original_name, return_prompt=True)
         if self.settings.model_name:
-            record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "utility")
+            input_tokens = cost_estimator.CostEstimator.count_tokens(prompt)
+            output_tokens = cost_estimator.CostEstimator.count_tokens(str(aggregator_result))
+            record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
         return aggregator_result
 
     def _verify_website_url(self, url: str, record: MerchantRecord) -> Optional[Dict[str, Any]]:
@@ -135,10 +146,13 @@ class ProcessingEngine:
             if not content or not content.strip():
                 return {"is_valid": False, "reasoning": "Website content was empty or could not be fetched."}
 
+            verification_result, prompt = self.api_client.verify_website_with_ai(content, record.original_name, return_prompt=True)
             if self.settings.model_name:
-                record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "verification")
+                input_tokens = cost_estimator.CostEstimator.count_tokens(prompt)
+                output_tokens = cost_estimator.CostEstimator.count_tokens(str(verification_result))
+                record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
 
-            return self.api_client.verify_website_with_ai(content, record.original_name)
+            return verification_result
         except requests.exceptions.RequestException as e:
             # Catch the specific exception re-raised from tools.py
             reason = f"Website fetch failed: {e}"
@@ -188,7 +202,7 @@ class ProcessingEngine:
         Constructs a clear, human-readable evidence string from the entire process.
         """
         trail_str = " | ".join(trail)
-        summary = analysis.get('extraction_summary', 'No summary provided.')
+        evidence = analysis.get('supporting_evidence', 'No supporting evidence provided by AI.')
 
         narrative = f"Conclusion: {conclusion}\n"
         if website:
@@ -198,7 +212,7 @@ class ProcessingEngine:
         else:
             narrative += "No validated website or social media was found.\n"
 
-        narrative += f"AI Extraction Summary: {summary}\n"
+        narrative += f"AI Supporting Evidence: '{evidence}'\n"
         narrative += f"Full Search & Verification Trail: {trail_str}"
 
         return narrative.strip()

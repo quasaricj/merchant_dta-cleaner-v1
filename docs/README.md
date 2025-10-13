@@ -64,6 +64,12 @@ This is the final step before processing begins.
 -   **Estimated Cost:** A real-time cost estimate is displayed based on the number of rows and the processing mode you have selected. If the cost is likely to exceed the budget (₹3.00/row), a warning will be shown.
 -   **Start Processing:** Once the "Merchant Name" column is mapped, the **"Start Processing"** button will become active. Click it to proceed.
 
+### A Note on How Results are Found
+
+The application's AI is governed by a strict set of rules based on `rules.md`. Its primary function is to analyze search results and find explicit, text-based evidence for a merchant's official name and website.
+
+The app will only output a cleaned name or website if the AI can find direct, supporting text in a search result's title or snippet. If no such evidence is found after all search attempts, the output fields for that row will be left blank, and the `Evidence` column will explain why. This rule-based approach ensures that you can trust the data in the output file, as every result is backed by a clear, auditable trail.
+
 ### Final Confirmation
 
 -   A final confirmation window will appear summarizing all your selected settings.
