@@ -107,5 +107,25 @@ The application automatically saves your progress.
 -   **Checkpoints:** During a long job, a `.checkpoint.json` file is created. If the application crashes or is stopped, you can simply re-run the same job, and it will automatically resume from the last checkpoint.
 -   **API Keys:** Your API keys are stored in `config/app_settings.json`. To back them up, simply copy this file to a safe location. To restore, place the backup file back in the `config` directory.
 
+## 8. Best Practices for Effective Use
+
+To ensure the application runs smoothly and provides the best results without errors, please follow these recommendations:
+
+-   **Recommended Batch Size:** While the application can handle very large files, we recommend processing files in batches of **no more than 200,000 rows at a time**. The application loads the entire Excel file into memory for processing, and this batch size ensures that memory usage stays within the limits of most modern computers (under 4GB, as specified in the SRS). For files larger than 200,000 rows, it is best to split them into smaller files first.
+
+-   **Use the Row Range Selector:** For very large files (over 200,000 rows) that you do not want to split, always use the **"Select Which Rows to Process"** feature. Processing a large file in smaller chunks (e.g., 1-100,000, then 100,001-200,000) is the most effective way to prevent memory-related crashes and ensures smooth operation.
+
+-   **File Location and Permissions:**
+    -   Run the application from a folder on a local drive (e.g., your Desktop or Documents folder). Running it from a network drive or a cloud-synced folder (like OneDrive or Dropbox) can sometimes cause file access errors if the network connection is slow or interrupted.
+    -   Ensure you have read permissions for the input file and write permissions for the output directory.
+
+-   **Stable Internet Connection:** The application makes numerous calls to Google's APIs. A stable internet connection is essential for the process to complete without interruption. If you are on an unstable connection, consider processing smaller batches of rows.
+
+-   **Checkpointing is Your Friend:** The application automatically saves your progress every 50-100 rows. If a job is interrupted for any reason (e.g., computer shutdown, loss of internet), you can simply re-run the exact same job (same input file, same output file, same settings). The application will detect the `.checkpoint.json` file and resume from where it left off, saving you time and API costs.
+
+-   **Do Not Modify Files During Processing:** Avoid opening or saving the input or output Excel files while a job is running. This can cause file corruption or lead to a crash. Wait until the job is fully complete before opening the results file.
+
+By following these guidelines, you can ensure a smooth, efficient, and error-free experience with the tool.
+
 ---
 Thank you for using the AI-Powered Merchant Data Cleaning Tool!
