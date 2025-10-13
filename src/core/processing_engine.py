@@ -62,47 +62,54 @@ class ProcessingEngine:
                 evidence_trail.append(" -> No web results found.")
                 continue
 
-            analysis = self.api_client.analyze_search_results(search_results, record.original_name, query)
+            analysis, analysis_prompt = self.api_client.analyze_search_results(search_results, record.original_name, query, return_prompt=True)
             if self.settings.model_name:
-                record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "analysis")
+                input_tokens = cost_estimator.CostEstimator.count_tokens(analysis_prompt)
+                output_tokens = cost_estimator.CostEstimator.count_tokens(str(analysis))
+                record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
+
             if not analysis:
                 evidence_trail.append(" -> AI analysis of results failed.")
                 continue
 
-            # Store the latest analysis in case we need it for a social-only result
+            supporting_evidence = analysis.get("supporting_evidence", "N/A")
+            evidence_trail.append(f" -> AI Supporting Evidence: '{supporting_evidence}'")
+
+            # Core business rule: Only proceed if the AI found a name based on the evidence.
+            if not analysis.get("cleaned_merchant_name"):
+                evidence_trail.append(" -> No merchant name found by AI in this result. Skipping.")
+                continue
+
             final_analysis = analysis
-            evidence_trail.append(f" -> AI Summary: '{analysis.get('extraction_summary', 'N/A')}'")
 
-            # Collect all social media candidates opportunistically
-            all_social_candidates.extend(analysis.get("social_media_candidates", []))
-
-            # Step 5: Attempt to validate website candidates from this query
-            website_candidates = analysis.get("website_candidates", [])
-            for website_url in website_candidates:
-                verification = self._verify_website_url(website_url, record)
+            # Step 5: Attempt to validate the single website candidate
+            website_candidate = analysis.get("website_candidate")
+            if website_candidate:
+                verification = self._verify_website_url(website_candidate, record)
                 if verification and verification.get("is_valid"):
-                    validated_website = website_url
-                    evidence_trail.append(f" -> SUCCESS: Website '{website_url}' verified. Reason: {verification.get('reasoning')}. Halting search.")
-                    break  # Exit the inner loop over website_candidates
+                    validated_website = website_candidate
+                    evidence_trail.append(f" -> SUCCESS: Website '{website_candidate}' verified. Reason: {verification.get('reasoning')}. Halting search.")
                 else:
                     reason = verification.get('reasoning', 'Verification failed')
-                    evidence_trail.append(f" -> Website '{website_url}' rejected. Reason: {reason}.")
+                    evidence_trail.append(f" -> Website '{website_candidate}' rejected. Reason: {reason}.")
 
+            # If a website is found and verified, stop searching
             if validated_website:
-                break # A valid website was found, so exit the main loop over queries
+                break
 
         # Step 6 & 7: Apply final business rules and generate evidence
-        # Prioritize rejecting closed businesses based on the last available analysis
         if final_analysis and final_analysis.get("business_status") in ["Permanently Closed", "Historical/Archived"]:
             evidence_trail.append(f"Rejected based on final analysis status: {final_analysis.get('business_status')}")
             self._apply_business_rules(record, final_analysis, None, None, evidence_trail, query)
         elif validated_website and final_analysis:
+            # If we have a validated website, we use it and ignore any social media.
             self._apply_business_rules(record, final_analysis, validated_website, None, evidence_trail, query)
-        elif all_social_candidates and final_analysis:
-            # No website found, so pick the best social link if available
-            best_social_candidate = self._choose_best_social_link(all_social_candidates)
-            evidence_trail.append(f"No website validated. Falling back to best social media link: {best_social_candidate}")
-            self._apply_business_rules(record, final_analysis, None, best_social_candidate, evidence_trail, queries[-1])
+        elif final_analysis:
+            # If no website, use the social media candidate if one was found by the AI.
+            social_candidate = final_analysis.get("social_media_candidate")
+            if social_candidate:
+                evidence_trail.append(f"No website validated. Falling back to social media link: {social_candidate}")
+            self._apply_business_rules(record, final_analysis, None, social_candidate, evidence_trail, queries[-1])
         else:
             # No usable information found at all
             record.cleaned_merchant_name = ""
@@ -119,9 +126,11 @@ class ProcessingEngine:
         if not record.original_name or not isinstance(record.original_name, str):
             return {"cleaned_name": "", "removal_reason": "Original name is empty or invalid."}
 
-        aggregator_result = self.api_client.remove_aggregators(record.original_name)
+        aggregator_result, prompt = self.api_client.remove_aggregators(record.original_name, return_prompt=True)
         if self.settings.model_name:
-            record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "utility")
+            input_tokens = cost_estimator.CostEstimator.count_tokens(prompt)
+            output_tokens = cost_estimator.CostEstimator.count_tokens(str(aggregator_result))
+            record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
         return aggregator_result
 
     def _verify_website_url(self, url: str, record: MerchantRecord) -> Optional[Dict[str, Any]]:
@@ -135,10 +144,13 @@ class ProcessingEngine:
             if not content or not content.strip():
                 return {"is_valid": False, "reasoning": "Website content was empty or could not be fetched."}
 
+            verification_result, prompt = self.api_client.verify_website_with_ai(content, record.original_name, return_prompt=True)
             if self.settings.model_name:
-                record.cost_per_row += cost_estimator.CostEstimator.get_model_cost(self.settings.model_name, "verification")
+                input_tokens = cost_estimator.CostEstimator.count_tokens(prompt)
+                output_tokens = cost_estimator.CostEstimator.count_tokens(str(verification_result))
+                record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
 
-            return self.api_client.verify_website_with_ai(content, record.original_name)
+            return verification_result
         except requests.exceptions.RequestException as e:
             # Catch the specific exception re-raised from tools.py
             reason = f"Website fetch failed: {e}"
@@ -188,7 +200,7 @@ class ProcessingEngine:
         Constructs a clear, human-readable evidence string from the entire process.
         """
         trail_str = " | ".join(trail)
-        summary = analysis.get('extraction_summary', 'No summary provided.')
+        evidence = analysis.get('supporting_evidence', 'No supporting evidence provided by AI.')
 
         narrative = f"Conclusion: {conclusion}\n"
         if website:
@@ -198,7 +210,7 @@ class ProcessingEngine:
         else:
             narrative += "No validated website or social media was found.\n"
 
-        narrative += f"AI Extraction Summary: {summary}\n"
+        narrative += f"AI Supporting Evidence: '{evidence}'\n"
         narrative += f"Full Search & Verification Trail: {trail_str}"
 
         return narrative.strip()
@@ -249,18 +261,3 @@ class ProcessingEngine:
                 queries.append(" ".join(query_list))
 
         return list(dict.fromkeys(queries)) # Return unique queries in order
-
-    def _choose_best_social_link(self, candidates: List[str]) -> Optional[str]:
-        """
-        From a list of social media URLs, picks the best one.
-        For now, this is a simple "first is best" implementation.
-        Future enhancement could involve more logic (e.g., matching profile name).
-        """
-        if not candidates:
-            return None
-        # Simple heuristic: prefer well-known platforms
-        for platform in ["facebook", "linkedin", "instagram", "twitter"]:
-            for url in candidates:
-                if platform in url:
-                    return url
-        return candidates[0]

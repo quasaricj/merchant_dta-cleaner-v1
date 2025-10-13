@@ -26,7 +26,7 @@ from src.app.ui_components.confirmation_screen import ConfirmationScreen
 from src.core.data_model import JobSettings, ColumnMapping, ApiConfig, OutputColumnConfig
 from src.core.cost_estimator import CostEstimator
 from src.core.job_manager import JobManager
-from src.core.config_manager import load_api_config, save_api_config
+from src.core.config_manager import load_api_config, save_api_config, is_first_launch, mark_first_launch_complete
 from src.services.google_api_client import GoogleApiClient
 from src.tools import view_text_website
 
@@ -90,13 +90,54 @@ class MainWindow(tk.Tk):
         self.create_menu()
         self.create_widgets()
         self.check_api_keys()
+        if is_first_launch():
+            self.after(500, lambda: self.show_user_guide(is_first_launch=True))
 
     def create_menu(self):
         menubar = tk.Menu(self)
         self.config(menu=menubar)
+
         settings_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Settings", menu=settings_menu)
         settings_menu.add_command(label="API Keys", command=self.open_api_key_dialog)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="View User Guide", command=self.show_user_guide)
+
+    def show_user_guide(self, is_first_launch=False):
+        try:
+            with open("docs/README.md", "r", encoding="utf-8") as f:
+                guide_text = f.read()
+        except FileNotFoundError:
+            guide_text = "Error: User guide (docs/README.md) not found."
+
+        guide_window = tk.Toplevel(self)
+        guide_window.title("User Guide")
+        guide_window.geometry("700x600")
+
+        text_frame = ttk.Frame(guide_window, padding="10")
+        text_frame.pack(fill="both", expand=True)
+
+        text_widget = tk.Text(text_frame, wrap="word", padx=10, pady=10, bg="#f0f0f0", relief="sunken", borderwidth=1)
+        text_widget.insert("1.0", guide_text)
+        text_widget.config(state="disabled")
+
+        scrollbar = ttk.Scrollbar(text_frame, command=text_widget.yview)
+        text_widget.config(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        text_widget.pack(side="left", fill="both", expand=True)
+
+        if is_first_launch:
+            welcome_label = ttk.Label(guide_window, text="Welcome! Here is a guide to get you started.", font=("Arial", 12, "bold"))
+            welcome_label.pack(pady=(5,10))
+            # Mark first launch as complete so this doesn't show again
+            mark_first_launch_complete()
+
+        guide_window.transient(self)
+        guide_window.grab_set()
+        self.wait_window(guide_window)
 
     def create_widgets(self):
         root_frame = ttk.Frame(self, padding="10")
@@ -341,10 +382,59 @@ class MainWindow(tk.Tk):
         self.after(0, self._finalize_logo_scraping_ui, final_status)
 
     def _finalize_logo_scraping_ui(self, final_status: str):
-        messagebox.showinfo("Logo Scraping Complete", final_status)
         self.logo_progress_frame.pack_forget()
         self.toggle_config_widgets(enabled=True)
+
+        # Extract the directory path from the final status message
+        logo_dir_path = ""
+        if "See folder:" in final_status:
+            try:
+                logo_dir_path = final_status.split("See folder:")[1].strip()
+            except IndexError:
+                logo_dir_path = "" # Stay empty if parsing fails
+
+        self._show_logo_completion_dialog(final_status, logo_dir_path)
         self.job_manager = None # Fully release the manager now
+
+    def _show_logo_completion_dialog(self, final_status: str, logo_dir_path: str):
+        dialog = tk.Toplevel(self)
+        dialog.title("Logo Scraping Complete")
+
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill="both", expand=True)
+
+        ttk.Label(main_frame, text=final_status.split("\n")[0], wraplength=400).pack(pady=(0, 15))
+
+        if logo_dir_path and os.path.exists(logo_dir_path):
+            ttk.Label(main_frame, text="Logos saved to:", anchor='w').pack(fill='x', pady=(10,0))
+            path_entry = ttk.Entry(main_frame, width=70)
+            path_entry.insert(0, logo_dir_path)
+            path_entry.config(state="readonly")
+            path_entry.pack(fill='x', expand=True, pady=(0, 10))
+
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(fill="x", pady=10)
+
+            def open_folder():
+                try:
+                    if sys.platform == "win32":
+                        os.startfile(logo_dir_path)
+                    elif sys.platform == "darwin":
+                        subprocess.run(["open", logo_dir_path], check=True)
+                    else:
+                        subprocess.run(["xdg-open", logo_dir_path], check=True)
+                except (OSError, subprocess.CalledProcessError) as e:
+                    messagebox.showerror("Error Opening Folder", f"Could not open the folder:\n{e}", parent=dialog)
+
+            open_button = ttk.Button(button_frame, text="Open Folder", command=open_folder)
+            open_button.pack(side="left")
+
+        ok_button = ttk.Button(main_frame, text="OK", command=dialog.destroy)
+        ok_button.pack(side="bottom", pady=(10,0))
+
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
 
     def _finalize_job_ui(self, final_status: str):
         output_path = self.job_settings.output_filepath if self.job_settings else None

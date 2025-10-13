@@ -93,3 +93,38 @@ def list_mapping_presets() -> list[str]:
         return []
 
     return [f.replace(".json", "") for f in os.listdir(MAPPING_PRESETS_DIR) if f.endswith(".json")]
+
+def is_first_launch() -> bool:
+    """
+    Checks if it's the first time the application is being launched by looking
+    for a 'first_launch_complete' flag in the config.
+    """
+    if not os.path.exists(CONFIG_FILE_PATH):
+        return True
+    try:
+        with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return not data.get("first_launch_complete", False)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return True
+
+def mark_first_launch_complete():
+    """
+    Sets the 'first_launch_complete' flag to true in the config file.
+    """
+    data = {}
+    if os.path.exists(CONFIG_FILE_PATH):
+        try:
+            with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            # If file is corrupted or unreadable, we'll create a new one.
+            pass
+
+    data["first_launch_complete"] = True
+
+    if not os.path.exists("config"):
+        os.makedirs("config")
+
+    with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)

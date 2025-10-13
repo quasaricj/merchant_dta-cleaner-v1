@@ -135,12 +135,21 @@ class JobManager:
             self.status_callback(0, 0, "Reading input file...")
             original_df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
 
+            # Correctly convert 1-based Excel row numbers to 0-based DataFrame indices
             start_index = thread_settings.start_row - 2
-            end_index = thread_settings.end_row - 2
-            total_rows_for_job = (end_index - start_index) + 1
+            end_index = thread_settings.end_row - 1
 
+            # Clamp values to be within the dataframe's bounds
+            start_index = max(0, start_index)
+            end_index = min(len(original_df), end_index)
+
+            # Handle checkpoint resumption
             current_run_start_index = self.start_from_row - 2
-            df_to_process = original_df.iloc[current_run_start_index:end_index + 1]
+            current_run_start_index = max(start_index, current_run_start_index)
+
+            df_to_process = original_df.iloc[current_run_start_index:end_index]
+
+            total_rows_for_job = (thread_settings.end_row - thread_settings.start_row) + 1
 
             self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
@@ -242,42 +251,34 @@ class JobManager:
 
     def _write_output_file(self, original_df: pd.DataFrame):
         """
-        Writes the final results to an Excel file by merging the processed data
-        back into the original full DataFrame, preserving all rows.
+        Writes the final results to an Excel file, creating a new file containing
+        only the processed rows from the user-selected range.
         """
         with self._lock:
             if not self.processed_records:
                 self.logger.warning("No records were processed, output file will not be written.")
-                try:
-                    original_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
-                    self.logger.info(f"Wrote original data to {self.settings.output_filepath} as no rows were processed.")
-                except (IOError, PermissionError) as e:
-                     raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Error: {e}")
                 return
 
-            final_df = original_df.copy()
             processed_df = pd.DataFrame([asdict(r) for r in self.processed_records])
-            start_index = self.settings.start_row - 2
 
+            # Determine the exact slice of the original dataframe that was processed
+            start_index = self.start_from_row - 2
+            end_index = start_index + len(self.processed_records)
+
+            # Take the correct slice of the original data
+            output_df = original_df.iloc[start_index:end_index].reset_index(drop=True)
+
+            # Update the slice with the processed data, ensuring column alignment
             for col_config in self.settings.output_columns:
-                if col_config.enabled and col_config.output_header not in final_df.columns:
-                    final_df[col_config.output_header] = pd.NA
-
-            for i, processed_row in processed_df.iterrows():
-                target_idx = start_index + i
-                if target_idx >= len(final_df):
-                    continue
-
-                for col_config in self.settings.output_columns:
-                    if col_config.enabled:
-                        source_value = getattr(processed_row, col_config.source_field, pd.NA)
-                        if isinstance(source_value, list):
-                            source_value = ', '.join(filter(None, source_value))
-                        final_df.loc[target_idx, col_config.output_header] = source_value
+                if col_config.enabled and col_config.source_field in processed_df.columns:
+                    # Use .values to avoid index misalignment issues
+                    output_df[col_config.output_header] = processed_df[col_config.source_field].values
 
         try:
-            final_df.to_excel(self.settings.output_filepath, index=False, na_rep='')
-            self.logger.info(f"Successfully wrote output to {self.settings.output_filepath}")
+            # Fill any potential NaN values from the merge with empty strings for clean output
+            output_df.fillna('', inplace=True)
+            output_df.to_excel(self.settings.output_filepath, index=False)
+            self.logger.info(f"Successfully wrote {len(output_df)} processed rows to {self.settings.output_filepath}")
         except (IOError, PermissionError) as e:
             raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Check permissions. Original error: {e}")
 

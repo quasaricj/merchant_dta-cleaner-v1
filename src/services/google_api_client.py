@@ -96,7 +96,7 @@ class GoogleApiClient:
             return None
 
     @retry_with_backoff()
-    def remove_aggregators(self, raw_name: str) -> Dict[str, Any]:
+    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Dict[str, Any]:
         """
         Uses a targeted AI prompt to identify and remove payment aggregator prefixes
         from a raw merchant string.
@@ -131,11 +131,13 @@ class GoogleApiClient:
         try:
             response = self.gemini_model.generate_content(prompt)
             cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
-            return json.loads(cleaned_response)
+            result_json = json.loads(cleaned_response)
+            return (result_json, prompt) if return_prompt else result_json
         except Exception as e:
             self.logger.error(f"Error during aggregator removal for '{raw_name}': {e}", exc_info=True)
             # Fallback to returning the original name if AI fails
-            return {"cleaned_name": raw_name, "removal_reason": f"AI processing failed: {e}"}
+            fallback_result = {"cleaned_name": raw_name, "removal_reason": f"AI processing failed: {e}"}
+            return (fallback_result, prompt) if return_prompt else fallback_result
 
     @retry_with_backoff()
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
@@ -170,10 +172,10 @@ class GoogleApiClient:
             return None
 
     @retry_with_backoff()
-    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str) -> Optional[Dict[str, Any]]:
+    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Uses an AI prompt to analyze search results and extract candidate information.
-        This prompt is for extraction, not final decision-making.
+        Uses a rule-driven AI prompt to analyze search results and extract candidate information,
+        sticking strictly to the evidence provided in the search results.
         """
         if not self.gemini_model:
             raise ConnectionError("Gemini model is not configured.")
@@ -183,82 +185,69 @@ class GoogleApiClient:
             formatted_results += f"Result {i}:\\nTitle: {result.get('title', 'N/A')}\\nLink: {result.get('link', 'N/A')}\\nSnippet: {result.get('snippet', 'N/A')}\\n\\n"
 
         prompt = f"""
-        You are a data extraction specialist. Your task is to analyze a list of web search results and extract potential business information based on a query. Do not make final decisions; your job is to identify all plausible candidates for a human reviewer (or a downstream process) to evaluate.
+        You are a data analyst governed by a strict set of rules. Your task is to analyze the provided web search results to find the official name and website for a merchant. You must not use any external knowledge or infer information not explicitly present in the provided text.
 
         **CONTEXT:**
-        - The original, messy merchant name was: "{original_name}"
+        - The original merchant string was: "{original_name}"
         - The search query used was: "{query}"
-        - The search results are provided below.
 
         **SEARCH RESULTS:**
         ---
         {formatted_results}
         ---
 
-        **EXTRACTION RULES:**
-        1.  **`cleaned_merchant_name`**: Extract the most likely official business name. Capitalize it properly (e.g., "Clean Juice"). If it's a franchise (e.g., "KFC New Delhi"), extract the main brand ("KFC"). If multiple names are plausible, choose the one that appears most frequently or officially in the results.
-        2.  **`website_candidates`**: Extract ALL potential official website URLs.
-            - A website URL is NOT a social media page (facebook.com, instagram.com).
-            - A website URL is NOT a page from an aggregator or directory (yelp.com, tripadvisor.com).
-            - List all unique, plausible URLs.
-        3.  **`social_media_candidates`**: Extract ALL potential official social media profile URLs (Facebook, Instagram, LinkedIn, etc.).
-            - A profile must look like a business page, not a personal one.
-            - List all unique, plausible URLs.
-        4.  **`business_status`**: Based on the snippets, determine the most likely status: "Operational", "Permanently Closed", "Uncertain".
-        5.  **`extraction_summary`**: Briefly explain your findings. For example: "Found a likely business name and two potential websites. One social media link was also identified from the search results." Do not try to make a final conclusion.
+        **RULES OF ANALYSIS (Follow these strictly):**
+        1.  **Goal:** Identify the single best `cleaned_merchant_name`, `website_candidate`, and `social_media_candidate`.
+        2.  **Evidence is Paramount:** You can only conclude a name or website if it is explicitly mentioned in the title or snippet of the search results.
+        3.  **Name Cleaning:**
+            - Find the most plausible official business name in the results. Capitalize it properly. For franchises, use the main brand only.
+            - If no name can be confidently identified, you **must** return an empty string.
+        4.  **Website Candidate:**
+            - Extract the single best *official business website* URL.
+            - Do NOT select a social media page (facebook.com, etc.) or a directory/aggregator page (yelp.com, etc.).
+            - If no valid website is found, return an empty string.
+        5.  **Social Media Candidate:**
+            - If no official website is found, extract the single best official social media profile URL.
+            - If a website is found, this should be an empty string.
+        6.  **Business Status:** Based *only* on the text in the snippets (e.g., "permanently closed"), determine the status: "Operational", "Permanently Closed", or "Uncertain".
+        7.  **Supporting Evidence:** You **must** quote the exact text from the title or snippet that justifies your choice of `cleaned_merchant_name`. If no name is found, state "No direct evidence found."
 
-        **FINAL JSON OUTPUT STRUCTURE (Strict):**
-        Return a single JSON object. Do not deviate from this structure. If nothing is found for a field, use an empty string or an empty list.
+        **OUTPUT (Strict JSON format only):**
+        Return a single JSON object. Do not deviate from this structure.
 
         ```json
         {{
           "cleaned_merchant_name": "...",
-          "website_candidates": ["...", "..."],
-          "social_media_candidates": ["...", "..."],
+          "website_candidate": "...",
+          "social_media_candidate": "...",
           "business_status": "...",
-          "extraction_summary": "..."
+          "supporting_evidence": "..."
         }}
         ```
 
-        Now, analyze the inputs and return the JSON containing the extracted candidate data.
+        Now, analyze the inputs and return the JSON.
         """
         try:
             response = self.gemini_model.generate_content(prompt)
-            # Handle potential markdown in the response
-            cleaned_response = response.text.strip()
-            if cleaned_response.startswith("```json"):
-                cleaned_response = cleaned_response[7:]
-            if cleaned_response.endswith("```"):
-                cleaned_response = cleaned_response[:-3]
-            cleaned_response = cleaned_response.strip()
-
-            return json.loads(cleaned_response)
+            cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+            result_json = json.loads(cleaned_response)
+            return (result_json, prompt) if return_prompt else result_json
         except (json.JSONDecodeError, TypeError) as e:
             self.logger.error(f"Error decoding AI JSON response for '{original_name}': {e}\nResponse was: {response.text}", exc_info=True)
-            return None
+            return (None, prompt) if return_prompt else None
         except Exception as e:
             self.logger.error(f"An unexpected error occurred during AI analysis for '{original_name}': {e}", exc_info=True)
-            return None
+            return (None, prompt) if return_prompt else None
 
     @retry_with_backoff()
-    def verify_website_with_ai(self, website_content: str, merchant_name: str) -> Optional[Dict[str, Any]]:
+    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
         """
         Uses the AI model to analyze the raw text content of a website to determine
         if it's a valid, operational business site.
-
-        Args:
-            website_content: The text/HTML content of the website's main page.
-            merchant_name: The name of the merchant being investigated, for context.
-
-        Returns:
-            A dictionary containing the AI's verdict, e.g.,
-            {"is_valid": True, "reasoning": "The website contains clear business information."}
-            or None if an error occurs.
         """
         if not self.gemini_model:
             raise ConnectionError("Gemini model is not configured.")
 
-        # Truncate content to avoid exceeding token limits, focusing on the start of the page.
         truncated_content = website_content[:15000]
 
         prompt = f"""
@@ -286,39 +275,17 @@ class GoogleApiClient:
         Provide your analysis in a strict JSON format with two keys:
         - `is_valid`: A boolean (`true` if it's a valid business site, `false` otherwise).
         - `reasoning`: A brief, one-sentence explanation for your decision in simple English.
-
-        Example Output 1 (Valid):
-        ```json
-        {{
-          "is_valid": true,
-          "reasoning": "The website contains specific company information, including services and contact details."
-        }}
-        ```
-
-        Example Output 2 (Invalid):
-        ```json
-        {{
-          "is_valid": false,
-          "reasoning": "The page explicitly states the domain is parked and for sale."
-        }}
-        ```
-
-        Now, analyze the provided website content and return the JSON output.
         """
         try:
             response = self.gemini_model.generate_content(prompt)
-            # Handle potential markdown in the response
-            cleaned_response = response.text.strip()
-            if cleaned_response.startswith("```json"):
-                cleaned_response = cleaned_response[7:]
-            if cleaned_response.endswith("```"):
-                cleaned_response = cleaned_response[:-3]
-            cleaned_response = cleaned_response.strip()
-
-            return json.loads(cleaned_response)
+            cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
+            result_json = json.loads(cleaned_response)
+            return (result_json, prompt) if return_prompt else result_json
         except (json.JSONDecodeError, TypeError) as e:
             self.logger.error(f"Error decoding AI JSON response for website verification: {e}\nResponse was: {response.text}", exc_info=True)
-            return {"is_valid": False, "reasoning": "AI response was not valid JSON."}
+            fallback_result = {"is_valid": False, "reasoning": "AI response was not valid JSON."}
+            return (fallback_result, prompt) if return_prompt else fallback_result
         except Exception as e:
             self.logger.error(f"An unexpected error occurred during AI website verification: {e}", exc_info=True)
-            return {"is_valid": False, "reasoning": f"An API error occurred: {e}"}
+            fallback_result = {"is_valid": False, "reasoning": f"An API error occurred: {e}"}
+            return (fallback_result, prompt) if return_prompt else fallback_result
