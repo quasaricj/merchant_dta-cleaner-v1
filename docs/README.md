@@ -1,8 +1,8 @@
-# AI-Powered Merchant Data Cleaning Tool - User Manual
+# J cleans - User Guide
 
 ## 1. Overview
 
-Welcome to the AI-Powered Merchant Data Cleaning Tool! This application is designed to help you automatically clean and enrich large Excel files containing merchant data. It uses powerful AI and search technologies to standardize messy transaction descriptions, find official business websites, and provide evidence for its decisions, saving you hours of manual research.
+Welcome to J cleans! This application is designed to help you automatically clean and enrich large Excel files containing merchant data. It uses powerful AI and search technologies to standardize messy transaction descriptions, find official business websites, and provide evidence for its decisions, saving you hours of manual research.
 
 This guide will walk you through how to install and use every feature of the application.
 
@@ -127,5 +127,14 @@ To ensure the application runs smoothly and provides the best results without er
 
 By following these guidelines, you can ensure a smooth, efficient, and error-free experience with the tool.
 
+## 9. Contact & Support
+
+If you encounter any issues, have questions, or would like to provide feedback, please do not hesitate to contact the developer. Your input is highly valued!
+
+-   **Name:** Jeeban Chandra
+-   **Email:** jeebanchandra4@gmail.com
+
+You can also access this information directly from the application by clicking on **Help -> Contact Support**.
+
 ---
-Thank you for using the AI-Powered Merchant Data Cleaning Tool!
+Thank you for using J cleans!

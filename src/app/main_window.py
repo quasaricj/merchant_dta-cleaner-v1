@@ -63,8 +63,14 @@ class MainWindow(tk.Tk):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.title("AI-Powered Merchant Data Cleaning Tool v1.1")
+        self.title("J cleans")
         self.geometry("800x800")
+        self.logger = logging.getLogger(__name__)
+        try:
+            # The .ico format is standard for Windows and supported by iconbitmap
+            self.iconbitmap("j_cleans_icon.ico")
+        except tk.TclError:
+            self.logger.warning("Application icon 'j_cleans_icon.ico' not found. Skipping.")
         self.job_settings: Optional[JobSettings] = None
         self.api_config: ApiConfig = load_api_config() or ApiConfig()
         self.job_manager: Optional[JobManager] = None
@@ -104,6 +110,18 @@ class MainWindow(tk.Tk):
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="View User Guide", command=self.show_user_guide)
+        help_menu.add_separator()
+        help_menu.add_command(label="Contact Support", command=self.show_contact_info)
+
+    def show_contact_info(self):
+        """Displays a dialog with contact information for support."""
+        contact_message = (
+            "For any questions, issues, or feedback, please contact the developer:\n\n"
+            "Name: Jeeban Chandra\n"
+            "Email: jeebanchandra4@gmail.com\n\n"
+            "Your feedback is valuable!"
+        )
+        messagebox.showinfo("Contact Information", contact_message, parent=self)
 
     def show_user_guide(self, is_first_launch=False):
         try:
@@ -113,7 +131,7 @@ class MainWindow(tk.Tk):
             guide_text = "Error: User guide (docs/README.md) not found."
 
         guide_window = tk.Toplevel(self)
-        guide_window.title("User Guide")
+        guide_window.title("J cleans - User Guide")
         guide_window.geometry("700x600")
 
         text_frame = ttk.Frame(guide_window, padding="10")
