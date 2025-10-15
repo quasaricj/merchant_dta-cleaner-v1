@@ -182,7 +182,7 @@ class TestProcessingEngine(unittest.TestCase):
         record_web = self._create_test_record()
         record_web.website = "http://www.web-inc.co.uk"
         filename_web = self.engine._generate_logo_filename(record_web)
-        self.assertEqual(filename_web, "web-inc.png")
+        self.assertEqual(filename_web, "web-inc.co.uk.png")
 
         # Test social media case
         record_social = self._create_test_record()
