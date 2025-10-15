@@ -224,7 +224,7 @@ class ProcessingEngine:
                 if not url.startswith(('http://', 'https://')):
                     url = 'http://' + url
                 domain = urlparse(url).netloc.replace("www.", "")
-                return f"{domain.split('.')[0]}.png"
+                return f"{domain}.png"
             except Exception:
                 return ""
 

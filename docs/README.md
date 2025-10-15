@@ -1,8 +1,8 @@
-# AI-Powered Merchant Data Cleaning Tool - User Manual
+# J cleans - User Guide
 
 ## 1. Overview
 
-Welcome to the AI-Powered Merchant Data Cleaning Tool! This application is designed to help you automatically clean and enrich large Excel files containing merchant data. It uses powerful AI and search technologies to standardize messy transaction descriptions, find official business websites, and provide evidence for its decisions, saving you hours of manual research.
+Welcome to J cleans! This application is designed to help you automatically clean and enrich large Excel files containing merchant data. It uses powerful AI and search technologies to standardize messy transaction descriptions, find official business websites, and provide evidence for its decisions, saving you hours of manual research.
 
 This guide will walk you through how to install and use every feature of the application.
 
@@ -64,6 +64,32 @@ This is the final step before processing begins.
 -   **Estimated Cost:** A real-time cost estimate is displayed based on the number of rows and the processing mode you have selected. If the cost is likely to exceed the budget (₹3.00/row), a warning will be shown.
 -   **Start Processing:** Once the "Merchant Name" column is mapped, the **"Start Processing"** button will become active. Click it to proceed.
 
+## 5. Understanding Costs & Billing
+
+For full transparency, it is important to understand how the application's costs are calculated.
+
+### API Billing is Direct from Google
+
+**J cleans is a desktop application and does not charge you for anything.** All costs incurred are for the use of Google's APIs (Gemini and Search) and are billed directly to you by Google through your Google Cloud account. You are responsible for managing your own API keys and billing with Google.
+
+### How is "Cost per row" Calculated?
+
+The `Cost per row` column in your output file shows the total cost in **USD ($)** for all the API calls made for that specific row. This cost can vary significantly from one row to the next based on how much work the application needs to do.
+
+Here is a breakdown of what contributes to the cost:
+
+1.  **Aggregator Removal (1 AI Call):** The first step is always a small AI call to clean up the merchant name (e.g., remove "PAYPAL *"). This is a fixed, small cost for every row.
+2.  **Web Searches (Multiple Calls):** The application performs up to 6 different Google searches to find the merchant. The cost for this depends on how many searches are needed. If a valid website is found on the first search, it stops, and the cost is low. If it has to go through all 6 searches, the cost will be higher.
+3.  **AI Analysis of Search Results (Multiple AI Calls):** For each web search that returns results, a powerful AI call is made to analyze those results. This is the most significant cost factor. If a result is found quickly, fewer of these calls are needed.
+4.  **Website Verification (1 AI Call - Optional):** If a potential website is found, one final AI call is made to read the website's content and verify if it's a real, operational business. This call only happens if a promising website candidate is found.
+
+**Why do costs vary per row?**
+
+-   A **low-cost row** is one where the merchant is found quickly. For example, the first search finds a valid website, so the process stops. This might involve only 1 search call and 1-2 AI analysis calls.
+-   A **high-cost row** is one where the application must try all 6 search queries, analyze the results for each, and potentially still not find a valid website. This maximizes the number of API calls and therefore the cost.
+
+This row-level cost tracking gives you full visibility into where your API budget is being spent.
+
 ### A Note on How Results are Found
 
 The application's AI is governed by a strict set of rules based on `rules.md`. Its primary function is to analyze search results and find explicit, text-based evidence for a merchant's official name and website.
@@ -76,7 +102,7 @@ The app will only output a cleaned name or website if the AI can find direct, su
 -   Review everything carefully.
 -   Click **"Confirm and Start"** to begin the job, or **"Cancel"** to go back and make changes.
 
-## 5. Monitoring Your Job
+## 6. Monitoring Your Job
 
 Once a job is running, the "Job Progress" section becomes active.
 
@@ -87,7 +113,7 @@ Once a job is running, the "Job Progress" section becomes active.
     -   **Resume:** Continue a paused job.
     -   **Stop:** Abort the job completely. If you stop a job, your progress up to that point is saved in a `.checkpoint` file, and the job can be resumed later by simply starting it again with the same input file.
 
-## 6. Reviewing the Results
+## 7. Reviewing the Results
 
 -   When the job is complete, a confirmation message will appear.
 -   A new Excel file will be created in the same directory as your input file, with `_cleaned` added to the name (e.g., `MyData_cleaned.xlsx`).
@@ -100,14 +126,14 @@ Once a job is running, the "Job Progress" section becomes active.
     -   `Cost per row`
     -   `Remarks` (contains notes from the cleaning process)
 
-## 7. Backup and Recovery
+## 8. Backup and Recovery
 
 The application automatically saves your progress.
 
 -   **Checkpoints:** During a long job, a `.checkpoint.json` file is created. If the application crashes or is stopped, you can simply re-run the same job, and it will automatically resume from the last checkpoint.
 -   **API Keys:** Your API keys are stored in `config/app_settings.json`. To back them up, simply copy this file to a safe location. To restore, place the backup file back in the `config` directory.
 
-## 8. Best Practices for Effective Use
+## 9. Best Practices for Effective Use
 
 To ensure the application runs smoothly and provides the best results without errors, please follow these recommendations:
 
@@ -127,5 +153,14 @@ To ensure the application runs smoothly and provides the best results without er
 
 By following these guidelines, you can ensure a smooth, efficient, and error-free experience with the tool.
 
+## 10. Contact & Support
+
+If you encounter any issues, have questions, or would like to provide feedback, please do not hesitate to contact the developer. Your input is highly valued!
+
+-   **Name:** Jeeban Chandra
+-   **Email:** jeebanchandra4@gmail.com
+
+You can also access this information directly from the application by clicking on **Help -> Contact Support**.
+
 ---
-Thank you for using the AI-Powered Merchant Data Cleaning Tool!
+Thank you for using J cleans!
