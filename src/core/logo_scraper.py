@@ -7,7 +7,7 @@ import os
 import shutil
 import requests
 from bs4 import BeautifulSoup
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable
 
 from src.core.data_model import MerchantRecord
 
@@ -19,9 +19,9 @@ class LogoScraper:
         self.records = records
         self.output_dir = output_dir
         self.fallback_image_path = fallback_image_path
-        self.report_data = []
+        self.report_data: List[Tuple[str, str, str]] = []
 
-    def run(self, progress_callback: callable):
+    def run(self, progress_callback: Callable[[int, int, str], None]):
         """
         Executes the logo scraping process for all records.
         """
@@ -59,8 +59,11 @@ class LogoScraper:
 
         # Simple heuristic: find an image with 'logo' in its src
         logo_img = soup.find('img', src=lambda s: s and 'logo' in s.lower())
-        if logo_img:
-            return requests.compat.urljoin(page_url, logo_img['src'])
+        if logo_img and logo_img.get('src'):
+            src = logo_img['src']
+            if isinstance(src, list):
+                src = src[0]
+            return requests.compat.urljoin(page_url, src)
 
         return None
 

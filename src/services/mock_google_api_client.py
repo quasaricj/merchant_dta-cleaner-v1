@@ -27,7 +27,7 @@ class MockGoogleApiClient:
         self.api_config = api_config
         self.model_name = model_name
         self.search_call_count = 0
-        self.gemini_call_timestamps = deque()
+        self.gemini_call_timestamps: deque[float] = deque()
         self.force_service_unavailable = False # Test flag for 503 errors
         self.force_invalid_key = False # Test flag for key validation
 
@@ -70,7 +70,7 @@ class MockGoogleApiClient:
         return True
 
     @retry_with_backoff()
-    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Dict[str, Any]:
+    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Any:
         """Mocks the aggregator removal AI call."""
         self._api_request_handler("gemini")
         prompt = "mock aggregator prompt"
@@ -79,7 +79,9 @@ class MockGoogleApiClient:
             result = {"cleaned_name": raw_name.replace("PAYPAL *", "").strip(), "removal_reason": "Removed 'PAYPAL *' prefix."}
         else:
             result = {"cleaned_name": raw_name, "removal_reason": "No aggregator found."}
-        return (result, prompt) if return_prompt else result
+        if return_prompt:
+            return result, prompt
+        return result
 
     @retry_with_backoff()
     def search_web(self, query: str, num_results: int = 5) -> Optional[List[Dict[str, str]]]:
@@ -93,7 +95,7 @@ class MockGoogleApiClient:
         }]
 
     @retry_with_backoff()
-    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
+    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Any:
         """Mocks the AI analysis of search results."""
         self._api_request_handler("gemini")
         prompt = "mock analysis prompt"
@@ -109,10 +111,12 @@ class MockGoogleApiClient:
           "business_status": "Operational",
           "supporting_evidence": "Found official site in search results."
         }
-        return (result, prompt) if return_prompt else result
+        if return_prompt:
+            return result, prompt
+        return result
 
     @retry_with_backoff()
-    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
+    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Any:
         """Mocks the AI verification of website content."""
         self._api_request_handler("gemini")
         prompt = "mock verification prompt"
@@ -121,7 +125,9 @@ class MockGoogleApiClient:
           "is_valid": True,
           "reasoning": "The website appears to be a legitimate and operational business page."
         }
-        return (result, prompt) if return_prompt else result
+        if return_prompt:
+            return result, prompt
+        return result
 
     # --- Utility methods for testing ---
     def reset_counters(self):

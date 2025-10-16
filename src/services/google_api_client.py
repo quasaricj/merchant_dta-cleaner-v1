@@ -12,8 +12,8 @@ from typing import Optional, List, Dict, Any
 import google.generativeai as genai
 from google.api_core import exceptions as google_exceptions
 import requests
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build # type: ignore
+from googleapiclient.errors import HttpError # type: ignore
 
 from src.core.data_model import ApiConfig
 from src.services.api_util import retry_with_backoff
@@ -24,7 +24,7 @@ class GoogleApiClient:
 
     def __init__(self, api_config: ApiConfig, model_name: Optional[str] = None):
         self.api_config = api_config
-        self.gemini_model = None
+        self.gemini_model: Optional[genai.GenerativeModel] = None
         self.search_service = None
         self.logger = logging.getLogger(__name__)
         self._configure_clients(model_name)
@@ -96,7 +96,7 @@ class GoogleApiClient:
             return None
 
     @retry_with_backoff()
-    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Dict[str, Any]:
+    def remove_aggregators(self, raw_name: str, return_prompt: bool = False) -> Any:
         """
         Uses a targeted AI prompt to identify and remove payment aggregator prefixes
         from a raw merchant string.
@@ -172,7 +172,7 @@ class GoogleApiClient:
             return None
 
     @retry_with_backoff()
-    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
+    def analyze_search_results(self, search_results: List[Dict], original_name: str, query: str, return_prompt: bool = False) -> Any:
         """
         Uses a rule-driven AI prompt to analyze search results and extract candidate information,
         sticking strictly to the evidence provided in the search results.
@@ -240,7 +240,7 @@ class GoogleApiClient:
             return (None, prompt) if return_prompt else None
 
     @retry_with_backoff()
-    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Optional[Dict[str, Any]]:
+    def verify_website_with_ai(self, website_content: str, merchant_name: str, return_prompt: bool = False) -> Any:
         """
         Uses the AI model to analyze the raw text content of a website to determine
         if it's a valid, operational business site.

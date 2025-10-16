@@ -63,8 +63,17 @@ class MainWindow(tk.Tk):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.title("AI-Powered Merchant Data Cleaning Tool v1.1")
+        self.title("J cleans")
         self.geometry("800x800")
+        self.logger = logging.getLogger(__name__)
+        try:
+            from PIL import Image, ImageTk
+            # Use Pillow to handle PNG and other formats for the icon
+            img = Image.open("j cleans icon.png")
+            self.icon_photo = ImageTk.PhotoImage(img) # Keep a reference
+            self.wm_iconphoto(True, self.icon_photo)
+        except (IOError, tk.TclError) as e:
+            self.logger.warning(f"Application icon 'j cleans icon.png' not found or failed to load: {e}. Skipping.")
         self.job_settings: Optional[JobSettings] = None
         self.api_config: ApiConfig = load_api_config() or ApiConfig()
         self.job_manager: Optional[JobManager] = None
@@ -89,9 +98,11 @@ class MainWindow(tk.Tk):
         self.logger = logging.getLogger(__name__)
         self.create_menu()
         self.create_widgets()
-        self.check_api_keys()
+        # On first launch, show the guide first, then check keys.
         if is_first_launch():
-            self.after(500, lambda: self.show_user_guide(is_first_launch=True))
+            self.after(200, self.show_user_guide_and_check_keys)
+        else:
+            self.check_api_keys()
 
     def create_menu(self):
         menubar = tk.Menu(self)
@@ -104,6 +115,18 @@ class MainWindow(tk.Tk):
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="View User Guide", command=self.show_user_guide)
+        help_menu.add_separator()
+        help_menu.add_command(label="Contact Support", command=self.show_contact_info)
+
+    def show_contact_info(self):
+        """Displays a dialog with contact information for support."""
+        contact_message = (
+            "For any questions, issues, or feedback, please contact the developer:\n\n"
+            "Name: Jeeban Chandra\n"
+            "Email: jeebanchandra4@gmail.com\n\n"
+            "Your feedback is valuable!"
+        )
+        messagebox.showinfo("Contact Information", contact_message, parent=self)
 
     def show_user_guide(self, is_first_launch=False):
         try:
@@ -113,7 +136,7 @@ class MainWindow(tk.Tk):
             guide_text = "Error: User guide (docs/README.md) not found."
 
         guide_window = tk.Toplevel(self)
-        guide_window.title("User Guide")
+        guide_window.title("J cleans - User Guide")
         guide_window.geometry("700x600")
 
         text_frame = ttk.Frame(guide_window, padding="10")
@@ -550,7 +573,13 @@ class MainWindow(tk.Tk):
             else: self.row_range_selector.disable(); messagebox.showwarning("Empty File", "Could not find any data rows.")
         except (IOError, ValueError) as e: self.row_range_selector.disable(); messagebox.showerror("Error Reading File", f"Could not determine file length.\nError: {e}")
 
-    def check_api_keys(self):
+    def show_user_guide_and_check_keys(self):
+        """Shows the user guide and then proceeds to check API keys."""
+        self.show_user_guide(is_first_launch=True)
+        # After the guide is closed, check the API keys.
+        self.check_api_keys(is_first_launch_flow=True)
+
+    def check_api_keys(self, is_first_launch_flow=False):
         if self.mock_mode.get():
             self.logger.info("Starting in Mock Mode. Skipping initial API key validation.")
             self._on_mock_mode_toggle() # Refresh UI for mock mode
@@ -558,8 +587,10 @@ class MainWindow(tk.Tk):
             self._start_api_validation_thread()
         else:
             if not self.mock_mode.get():
-                 messagebox.showinfo("API Key Setup", "Welcome! Please enter your API keys to begin, or enable Mock Mode for offline testing.")
-                 self.open_api_key_dialog()
+                # On first launch, the guide has already been shown. Now show the API dialog.
+                if is_first_launch_flow:
+                     messagebox.showinfo("API Key Setup", "Welcome! Please enter your API keys to begin, or enable Mock Mode for offline testing.")
+                     self.open_api_key_dialog()
 
     def _start_api_validation_thread(self):
         """Starts the API validation process in a background thread."""
@@ -598,7 +629,11 @@ class MainWindow(tk.Tk):
 
         if models:
             self.available_models = sorted(models)
-            model_display_list = [f"{m} (~${CostEstimator.get_model_cost(m):.4f}/req)" for m in self.available_models]
+            model_display_list = []
+            for m in self.available_models:
+                # A bit of a simplification, but good enough for UI display
+                cost = CostEstimator.calculate_prompt_cost(m, 1000, 200)
+                model_display_list.append(f"{m} (~${cost:.4f}/req)")
             self.api_keys_validated = True
             self.model_selector.config(values=model_display_list, state="readonly")
             if model_display_list: self.model_selector.set(model_display_list[0])
