@@ -18,6 +18,7 @@ import pandas as pd
 from src.core.data_model import (JobSettings, MerchantRecord, ApiConfig,
                                   ColumnMapping, OutputColumnConfig)
 from src.core.processing_engine import ProcessingEngine
+from typing import Union, cast
 from src.services.google_api_client import GoogleApiClient
 from src.services.mock_google_api_client import MockGoogleApiClient
 from src.core.logo_scraper import LogoScraper
@@ -45,6 +46,8 @@ class JobManager:
         self.processed_records: List[MerchantRecord] = []
         self.start_from_row = self.settings.start_row
         self.checkpoint_path = f"{self.settings.input_filepath}.checkpoint.json"
+        self.api_client: Union[GoogleApiClient, MockGoogleApiClient]
+        self.processing_engine: ProcessingEngine
         self.logger = logging.getLogger(__name__)
         if not self.logger.handlers:
             log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -127,10 +130,10 @@ class JobManager:
             self.status_callback(0, 0, "Initializing API clients...")
             if thread_settings.mock_mode:
                 self.logger.info("MOCK MODE ENABLED. Using MockGoogleApiClient.")
-                api_client = MockGoogleApiClient(self.api_config, model_name=thread_settings.model_name)
+                self.api_client = MockGoogleApiClient(self.api_config, model_name=thread_settings.model_name)
             else:
-                api_client = GoogleApiClient(self.api_config, model_name=thread_settings.model_name)
-            engine = ProcessingEngine(thread_settings, api_client, self.view_text_website_func)
+                self.api_client = GoogleApiClient(self.api_config, model_name=thread_settings.model_name)
+            self.processing_engine = ProcessingEngine(thread_settings, cast(GoogleApiClient, self.api_client), self.view_text_website_func)
 
             self.status_callback(0, 0, "Reading input file...")
             original_df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
@@ -161,9 +164,9 @@ class JobManager:
 
                 try:
                     record = self._create_record_from_row(row, thread_settings.column_mapping)
-                    processed_record = engine.process_record(record)
+                    processed_record = self.processing_engine.process_record(record)
                 except Exception as row_error:
-                    self.logger.error(f"Failed to process row {i + 2}. Error: {row_error}", exc_info=True)
+                    self.logger.error(f"Failed to process row {int(i) + 2}. Error: {row_error}", exc_info=True)
                     # Create a "failed" record to preserve original data and mark the error
                     processed_record = self._create_record_from_row(row, thread_settings.column_mapping)
                     processed_record.remarks = f"FATAL_ERROR: {row_error}"
@@ -173,11 +176,11 @@ class JobManager:
                 with self._lock:
                     self.processed_records.append(processed_record)
 
-                last_processed_absolute_row = i + 2
+                last_processed_absolute_row = int(i) + 2
                 self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
                 if len(self.processed_records) % 50 == 0:
-                    self._save_checkpoint(current_row=last_processed_absolute_row, settings_to_save=thread_settings)
+                    self._save_checkpoint(current_row=int(last_processed_absolute_row), settings_to_save=thread_settings)
 
             if self._is_stopped:
                 if self.processed_records:

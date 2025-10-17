@@ -12,9 +12,12 @@ from src.app.main_window import MainWindow
 class TestUIFeatures(unittest.TestCase):
 
     @patch('tkinter.Tk')
-    def setUp(self, mock_tk):
+    @patch('src.app.main_window.is_first_launch', return_value=False)
+    def setUp(self, mock_is_first_launch, mock_tk):
         # We patch Tk to prevent actual UI rendering during tests
         self.app = MainWindow()
+        # Patch the blocking method
+        self.app.wait_window = MagicMock()
 
     @patch('tkinter.Toplevel')
     @patch('src.app.main_window.mark_first_launch_complete')
@@ -37,16 +40,16 @@ class TestUIFeatures(unittest.TestCase):
 
     @patch('tkinter.Toplevel')
     @patch('os.path.exists', return_value=True)
+    @patch('os.path.isdir', return_value=True)
     @patch('subprocess.run')
-    @patch('os.startfile')
-    def test_logo_completion_dialog_shows_and_opens_folder(self, mock_startfile, mock_subprocess_run, mock_exists, mock_toplevel):
+    def test_logo_completion_dialog_shows_and_opens_folder(self, mock_subprocess_run, mock_isdir, mock_exists, mock_toplevel):
         """Test the logo completion dialog appears and the 'Open Folder' button works."""
 
         # This is a simplified way to test the Toplevel dialog's functionality
         # without fully rendering the UI. We'll check if the dialog is created
         # and if the correct folder-opening command is called.
 
-        logo_path = "/fake/path/to/logos"
+        logo_path = os.path.abspath(os.path.dirname(__file__))
         status_message = f"Logo scraping complete. See folder: {logo_path}"
 
         # We need a way to "click" the button. We'll grab the command from the mock call.
@@ -63,8 +66,9 @@ class TestUIFeatures(unittest.TestCase):
         # Find the call to create the "Open Folder" button and extract the command
         open_folder_command = None
         for call in mock_button.call_args_list:
-            if call.kwargs.get('text') == 'Open Folder':
-                open_folder_command = call.kwargs.get('command')
+            kwargs = call.kwargs
+            if kwargs.get('text') == 'Open Folder' and 'command' in kwargs:
+                open_folder_command = kwargs['command']
                 break
 
         self.assertIsNotNone(open_folder_command, "Open Folder button was not created.")
@@ -74,10 +78,15 @@ class TestUIFeatures(unittest.TestCase):
 
         # Check that the correct OS command was called
         if sys.platform == "win32":
-            mock_startfile.assert_called_with(logo_path)
+            # On Windows, os.startfile is used. We need to patch it separately.
+            with patch('os.startfile') as mock_startfile:
+                open_folder_command()
+                mock_startfile.assert_called_with(logo_path)
         elif sys.platform == "darwin":
+            open_folder_command()
             mock_subprocess_run.assert_called_with(["open", logo_path], check=True)
         else:
+            open_folder_command()
             mock_subprocess_run.assert_called_with(["xdg-open", logo_path], check=True)
 
 if __name__ == '__main__':

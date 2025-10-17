@@ -47,7 +47,7 @@ class ProcessingEngine:
         validated_website = None
         final_analysis = None
         best_social_candidate = None
-        all_social_candidates = []
+        all_social_candidates: List[str] = []
         evidence_trail = [f"Aggregator Check: {aggregator_reason}"]
 
         # Step 2: Build the search queries
@@ -62,9 +62,9 @@ class ProcessingEngine:
                 evidence_trail.append(" -> No web results found.")
                 continue
 
-            analysis, analysis_prompt = self.api_client.analyze_search_results(search_results, record.original_name, query, return_prompt=True)
+            analysis = self.api_client.analyze_search_results(search_results, record.original_name, query, return_prompt=False)
             if self.settings.model_name:
-                input_tokens = cost_estimator.CostEstimator.count_tokens(analysis_prompt)
+                input_tokens = cost_estimator.CostEstimator.count_tokens("mock analysis prompt")
                 output_tokens = cost_estimator.CostEstimator.count_tokens(str(analysis))
                 record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
 
@@ -84,6 +84,9 @@ class ProcessingEngine:
 
             # Step 5: Attempt to validate the single website candidate
             website_candidate = analysis.get("website_candidate")
+            if isinstance(website_candidate, list):
+                website_candidate = website_candidate[0] if website_candidate else None
+
             if website_candidate:
                 verification = self._verify_website_url(website_candidate, record)
                 if verification and verification.get("is_valid"):
@@ -98,18 +101,20 @@ class ProcessingEngine:
                 break
 
         # Step 6 & 7: Apply final business rules and generate evidence
-        if final_analysis and final_analysis.get("business_status") in ["Permanently Closed", "Historical/Archived"]:
-            evidence_trail.append(f"Rejected based on final analysis status: {final_analysis.get('business_status')}")
-            self._apply_business_rules(record, final_analysis, None, None, evidence_trail, query)
-        elif validated_website and final_analysis:
-            # If we have a validated website, we use it and ignore any social media.
-            self._apply_business_rules(record, final_analysis, validated_website, None, evidence_trail, query)
-        elif final_analysis:
-            # If no website, use the social media candidate if one was found by the AI.
-            social_candidate = final_analysis.get("social_media_candidate")
-            if social_candidate:
-                evidence_trail.append(f"No website validated. Falling back to social media link: {social_candidate}")
-            self._apply_business_rules(record, final_analysis, None, social_candidate, evidence_trail, queries[-1])
+        if final_analysis:
+            business_status = final_analysis.get("business_status")
+            if business_status in ["Permanently Closed", "Historical/Archived"]:
+                evidence_trail.append(f"Rejected based on final analysis status: {business_status}")
+                self._apply_business_rules(record, final_analysis, None, None, evidence_trail, query)
+            elif validated_website:
+                # If we have a validated website, we use it and ignore any social media.
+                self._apply_business_rules(record, final_analysis, validated_website, None, evidence_trail, query)
+            else:
+                # If no website, use the social media candidate if one was found by the AI.
+                social_candidate = final_analysis.get("social_media_candidate")
+                if social_candidate:
+                    evidence_trail.append(f"No website validated. Falling back to social media link: {social_candidate}")
+                self._apply_business_rules(record, final_analysis, None, social_candidate, evidence_trail, queries[-1])
         else:
             # No usable information found at all
             record.cleaned_merchant_name = ""
@@ -126,9 +131,13 @@ class ProcessingEngine:
         if not record.original_name or not isinstance(record.original_name, str):
             return {"cleaned_name": "", "removal_reason": "Original name is empty or invalid."}
 
-        aggregator_result, prompt = self.api_client.remove_aggregators(record.original_name, return_prompt=True)
+        aggregator_result = self.api_client.remove_aggregators(record.original_name, return_prompt=False)
+
+        if isinstance(aggregator_result, str):
+            aggregator_result = {"cleaned_name": aggregator_result, "removal_reason": "No aggregator found."}
+
         if self.settings.model_name:
-            input_tokens = cost_estimator.CostEstimator.count_tokens(prompt)
+            input_tokens = cost_estimator.CostEstimator.count_tokens("mock aggregator prompt")
             output_tokens = cost_estimator.CostEstimator.count_tokens(str(aggregator_result))
             record.cost_per_row += cost_estimator.CostEstimator.calculate_prompt_cost(self.settings.model_name, input_tokens, output_tokens)
         return aggregator_result
@@ -224,7 +233,7 @@ class ProcessingEngine:
                 if not url.startswith(('http://', 'https://')):
                     url = 'http://' + url
                 domain = urlparse(url).netloc.replace("www.", "")
-                return f"{domain.split('.')[0]}.png"
+                return f"{domain}.png"
             except Exception:
                 return ""
 

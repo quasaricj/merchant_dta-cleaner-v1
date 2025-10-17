@@ -2,7 +2,24 @@ import subprocess
 import sys
 import os
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
+
+def get_icon_path():
+    """
+    Opens a file dialog for the user to select an icon file.
+    Returns the path to the icon or None if canceled.
+    """
+    if messagebox.askyesno("Icon Selection", "Do you want to add a custom icon to the executable?"):
+        icon_path = filedialog.askopenfilename(
+            title="Select Icon File",
+            filetypes=[("Icon files", "*.ico"), ("All files", "*.*")]
+        )
+        if icon_path:
+            return icon_path
+        else:
+            messagebox.showwarning("No Icon Selected", "No icon file was selected. The build will proceed with the default icon.")
+            return None
+    return None
 
 def install_pyinstaller():
     """
@@ -34,7 +51,7 @@ def install_pyinstaller():
         else:
             return False
 
-def create_executable():
+def create_executable(icon_path=None):
     """
     Runs the PyInstaller command to build the standalone executable.
     """
@@ -54,8 +71,14 @@ def create_executable():
         "--add-data", "config/mapping_presets:config/mapping_presets",
         "--distpath", "./dist",
         "--workpath", "./build",
-        "src/main.py"
     ]
+
+    # Add the icon argument if a path is provided
+    if icon_path:
+        command.extend(["--icon", icon_path])
+
+    command.append("src/main.py")
+
 
     try:
         # Run the command and capture output
@@ -123,6 +146,7 @@ if __name__ == "__main__":
         "in a 'dist' folder.\n\nThe process may take several minutes.\n\nDo you want to continue?"
     ):
         if install_pyinstaller():
-            create_executable()
+            icon = get_icon_path()
+            create_executable(icon_path=icon)
 
     root.destroy()

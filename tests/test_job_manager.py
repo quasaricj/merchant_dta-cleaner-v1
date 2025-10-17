@@ -6,6 +6,7 @@ import time
 import json
 import tempfile
 import shutil
+import logging
 
 from src.core.job_manager import JobManager
 from src.core.data_model import JobSettings, ApiConfig, ColumnMapping, MerchantRecord
@@ -43,9 +44,12 @@ class TestJobManager(unittest.TestCase):
 
     def tearDown(self):
         """Clean up files created during tests."""
+        # Shutdown the logger to release the file handle on job.log
+        logging.shutdown()
         shutil.rmtree(self.test_dir)
-        if os.path.exists("job.log"):
-            os.remove("job.log")
+        # The log file is now created inside the test_dir, so this is not needed
+        # if os.path.exists("job.log"):
+        #     os.remove("job.log")
 
     @patch('src.core.job_manager.GoogleApiClient')
     @patch('src.core.job_manager.ProcessingEngine')

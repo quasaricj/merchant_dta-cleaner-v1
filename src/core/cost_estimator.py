@@ -72,7 +72,7 @@ class CostEstimator:
             return 0.0
 
         # Estimate cost for one row assuming a worst-case scenario
-        cost_per_row = 0
+        cost_per_row = 0.0
         # 1. Aggregator removal call
         cost_per_row += CostEstimator.calculate_prompt_cost(
             model_name,
