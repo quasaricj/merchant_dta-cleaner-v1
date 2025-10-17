@@ -67,13 +67,9 @@ class MainWindow(tk.Tk):
         self.geometry("800x800")
         self.logger = logging.getLogger(__name__)
         try:
-            from PIL import Image, ImageTk
-            # Use Pillow to handle PNG and other formats for the icon
-            img = Image.open("j cleans icon.png")
-            self.icon_photo = ImageTk.PhotoImage(img) # Keep a reference
-            self.wm_iconphoto(True, self.icon_photo)
-        except (IOError, tk.TclError) as e:
-            self.logger.warning(f"Application icon 'j cleans icon.png' not found or failed to load: {e}. Skipping.")
+          self.iconbitmap("j_cleans_icon.ico")
+        except tk.TclError:
+            self.logger.warning("Application icon 'j_cleans_icon.ico' not found. Skipping.")
         self.job_settings: Optional[JobSettings] = None
         self.api_config: ApiConfig = load_api_config() or ApiConfig()
         self.job_manager: Optional[JobManager] = None
