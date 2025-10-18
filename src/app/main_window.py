@@ -26,6 +26,7 @@ from src.app.ui_components.confirmation_screen import ConfirmationScreen
 from src.core.data_model import JobSettings, ColumnMapping, ApiConfig, OutputColumnConfig
 from src.core.cost_estimator import CostEstimator
 from src.core.job_manager import JobManager
+from src.core.logo_only_job_manager import LogoOnlyJobManager
 from src.core.config_manager import load_api_config, save_api_config, is_first_launch, mark_first_launch_complete
 from src.services.google_api_client import GoogleApiClient
 from src.tools import view_text_website
@@ -91,6 +92,11 @@ class MainWindow(tk.Tk):
         self.available_models: List[str] = []
         self.api_keys_validated = False
         self.mock_mode = tk.BooleanVar(value=False)
+        self.notebook: ttk.Notebook
+        self.logo_only_job_manager: Optional[LogoOnlyJobManager] = None
+        self.logo_only_file_selector: FileSelector
+        self.logo_only_column_mapper: ColumnMapper
+        self.logo_only_start_button: ttk.Button
         self.logger = logging.getLogger(__name__)
         self.create_menu()
         self.create_widgets()
@@ -183,8 +189,22 @@ class MainWindow(tk.Tk):
         credit_label = ttk.Label(progress_frame, text="made by jeeban", font=("Arial", 8, "italic"), foreground="gray")
         credit_label.pack(side="right", padx=5, pady=5)
 
+        # --- Main application notebook for different modes ---
+        self.notebook = ttk.Notebook(root_frame)
+        self.notebook.pack(fill="both", expand=True, pady=5)
+
+        enrichment_tab = ttk.Frame(self.notebook)
+        logo_scraper_tab = ttk.Frame(self.notebook)
+
+        self.notebook.add(enrichment_tab, text="Data Enrichment")
+        self.notebook.add(logo_scraper_tab, text="Logo-Only Scraper")
+
+        self._create_enrichment_tab(enrichment_tab)
+        self._create_logo_scraper_tab(logo_scraper_tab)
+
+    def _create_enrichment_tab(self, parent_tab):
         # Top frame for configuration options, with a scrollbar
-        scroll_container = ttk.Frame(root_frame)
+        scroll_container = ttk.Frame(parent_tab)
         scroll_container.pack(fill="both", expand=True)
         canvas = tk.Canvas(scroll_container)
         scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
@@ -238,6 +258,92 @@ class MainWindow(tk.Tk):
         self.start_button = ttk.Button(controls_frame, text="Start Processing", command=self.start_processing, state="disabled")
         self.start_button.grid(row=4, column=0, columnspan=2, pady=10, ipadx=10, ipady=5)
         self.start_button_tooltip = Tooltip(self.start_button, "Please configure API keys and select a file to enable.")
+
+    def _create_logo_scraper_tab(self, parent_tab):
+        """Creates the UI components for the 'Logo-Only Scraper' tab."""
+        # Frame to hold all content, allowing for some padding
+        main_frame = ttk.Frame(parent_tab, padding="10")
+        main_frame.pack(fill="both", expand=True)
+
+        # 1. File Selector
+        file_selector_frame = ttk.LabelFrame(main_frame, text="Step 1: Select Processed Excel File", padding="10")
+        file_selector_frame.pack(fill="x", pady=5)
+        self.logo_only_file_selector = FileSelector(
+            file_selector_frame,
+            on_file_select=self._handle_logo_file_selection,
+            on_output_select=lambda: None, # Dummy callback as it's not needed here
+            require_output=False
+        )
+        self.logo_only_file_selector.pack(fill="x", expand=True)
+
+        # 2. Column Mapper
+        column_mapper_frame = ttk.LabelFrame(main_frame, text="Step 2: Map Logo-Related Columns", padding="10")
+        column_mapper_frame.pack(fill="both", expand=True, pady=5)
+        logo_only_required_cols = {
+            "cleaned_merchant_name": "Clean Merchant Name (mandatory)",
+            "website": "Official Website (mandatory)",
+            "social_media_links": "Social Media Links (optional)",
+            "logo_filename": "Logo Filename (mandatory)"
+        }
+        self.logo_only_column_mapper = ColumnMapper(
+            parent=column_mapper_frame,
+            on_mapping_update=self._handle_logo_mapping_update,
+            required_columns=logo_only_required_cols
+        )
+        self.logo_only_column_mapper.pack(fill="both", expand=True)
+
+        # 3. Start Button
+        controls_frame = ttk.LabelFrame(main_frame, text="Step 3: Run Scraper", padding="10")
+        controls_frame.pack(fill="x", pady=10)
+        self.logo_only_start_button = ttk.Button(controls_frame, text="Start Logo Scraping", command=self._start_logo_only_scraping, state="disabled")
+        self.logo_only_start_button.pack(pady=10, ipadx=10, ipady=5)
+
+    def _handle_logo_file_selection(self, filepath: str):
+        """Callback when a file is selected in the logo-only tab."""
+        self.logo_only_column_mapper.load_file(filepath)
+        self._validate_logo_scraper_readiness()
+
+    def _handle_logo_mapping_update(self, mapping: Optional[ColumnMapping]):
+        """Callback when column mapping is updated in the logo-only tab."""
+        self._validate_logo_scraper_readiness()
+
+    def _validate_logo_scraper_readiness(self):
+        """Checks if the logo scraper is ready to start and enables/disables the start button."""
+        is_ready = (
+            self.logo_only_file_selector.get_filepath() and
+            self.logo_only_column_mapper.is_mapping_valid()
+        )
+        self.logo_only_start_button.config(state="normal" if is_ready else "disabled")
+
+    def _start_logo_only_scraping(self):
+        """Starts the standalone logo scraping job."""
+        input_file = self.logo_only_file_selector.get_filepath()
+        mapping_dict = self.logo_only_column_mapper.get_mapping_as_dict()
+
+        if not input_file or not self.logo_only_column_mapper.is_mapping_valid():
+            messagebox.showerror("Error", "Please select a file and map all mandatory columns.")
+            return
+
+        self.notebook.tab(0, state="disabled")
+        self.logo_only_file_selector.toggle_controls(False)
+        self.logo_only_column_mapper.toggle_controls(False)
+        self.logo_only_start_button.config(state="disabled")
+
+        self.progress_monitor.job_started(is_logo_only=True)
+        self.logo_progress_frame.pack(fill='x', expand=True, pady=5)
+
+        self.logo_only_job_manager = LogoOnlyJobManager(
+            input_filepath=input_file,
+            column_mapping=mapping_dict,
+            status_callback=self.handle_logo_status_update,
+            completion_callback=self._finalize_logo_only_job
+        )
+        try:
+            self.logo_only_job_manager.start()
+        except (ValueError, FileNotFoundError, Exception) as e:
+            self.logger.error(f"Failed to start logo-only job: {e}", exc_info=True)
+            messagebox.showerror("Failed to Start Job", f"Could not start the logo scraping job:\n\n{e}")
+            self._finalize_logo_only_job("Startup Failed")
 
     def _on_mock_mode_toggle(self):
         """Handles the logic when the mock mode checkbox is toggled."""
@@ -378,12 +484,16 @@ class MainWindow(tk.Tk):
 
     def pause_job(self):
         if self.job_manager: self.job_manager.pause(); self.progress_monitor.job_paused()
+        if self.logo_only_job_manager: self.logo_only_job_manager.stop()
 
     def resume_job(self):
         if self.job_manager: self.job_manager.resume(); self.progress_monitor.job_resumed()
 
     def stop_job(self):
-        if self.job_manager and messagebox.askyesno("Confirm Stop", "Are you sure you want to stop the job? Progress will be saved."): self.job_manager.stop()
+        if self.job_manager and self.job_manager._thread.is_alive() and messagebox.askyesno("Confirm Stop", "Are you sure you want to stop the enrichment job? Progress will be saved."):
+            self.job_manager.stop()
+        if self.logo_only_job_manager and self.logo_only_job_manager._thread.is_alive() and messagebox.askyesno("Confirm Stop", "Are you sure you want to stop the logo scraping job?"):
+            self.logo_only_job_manager.stop()
 
     def handle_status_update(self, current: int, total: int, status: str): self.after(0, self.progress_monitor.update_progress, current, total, status)
     def handle_completion(self, final_status: str): self.after(0, self._finalize_job_ui, final_status)
@@ -399,6 +509,31 @@ class MainWindow(tk.Tk):
 
     def handle_logo_completion(self, final_status: str):
         self.after(0, self._finalize_logo_scraping_ui, final_status)
+
+    def _finalize_logo_only_job(self, final_status: str):
+        """Callback to finalize the UI after a logo-only job completes."""
+        self.logo_progress_frame.pack_forget()
+        self.progress_monitor.reset_to_idle()
+
+        # Re-enable all controls
+        self.notebook.tab(0, state="normal")
+        self.logo_only_file_selector.toggle_controls(True)
+        self.logo_only_column_mapper.toggle_controls(True)
+        self._validate_logo_scraper_readiness()
+
+        logo_dir_path = ""
+        if "See folder:" in final_status:
+            try:
+                logo_dir_path = final_status.split("See folder:")[1].strip()
+            except IndexError:
+                logo_dir_path = ""
+
+        if "Failed" in final_status or "Stopped" in final_status:
+             messagebox.showwarning("Job Incomplete", f"The logo scraping job has finished.\n\nStatus: {final_status}")
+        else:
+            self._show_logo_completion_dialog(final_status, logo_dir_path)
+
+        self.logo_only_job_manager = None
 
     def _finalize_logo_scraping_ui(self, final_status: str):
         self.logo_progress_frame.pack_forget()
@@ -528,6 +663,7 @@ class MainWindow(tk.Tk):
         Disables or enables all user-configurable widgets in the main interface
         to prevent changes during a processing job.
         """
+        self.notebook.tab(1, state="normal" if enabled else "disabled")
         state = "normal" if enabled else "disabled"
         # Explicitly toggle each major component
         self.file_selector.toggle_controls(enabled)
@@ -537,7 +673,7 @@ class MainWindow(tk.Tk):
         self.mode_selector.toggle_controls(enabled)
 
         # Toggle the Start button separately
-        self.start_button.config(state="normal" if enabled else "disabled")
+        self.validate_for_processing()
 
         # Handle the AI model selector state
         if self.api_keys_validated:

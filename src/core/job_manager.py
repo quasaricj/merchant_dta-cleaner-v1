@@ -138,22 +138,31 @@ class JobManager:
             self.status_callback(0, 0, "Reading input file...")
             original_df = pd.read_excel(thread_settings.input_filepath, header=0, engine='openpyxl', keep_default_na=False)
 
-            # Correctly convert 1-based Excel row numbers to 0-based DataFrame indices
+            # --- REVISED AND CORRECTED SLICING LOGIC ---
+            # Convert 1-based Excel row numbers (which are inclusive) to 0-based DataFrame indices (which are half-open).
+            # A user selection of row 2 corresponds to index 0.
             start_index = thread_settings.start_row - 2
-            end_index = thread_settings.end_row - 1
+            # A user selection of rows 2-11 (10 rows) should slice from index 0 to 10 (exclusive).
+            # The end row number is inclusive, so we subtract 1 to get the correct slice boundary.
+            end_index = thread_settings.end_row -1
 
-            # Clamp values to be within the dataframe's bounds
+            # Clamp values to be within the dataframe's actual bounds.
             start_index = max(0, start_index)
+            # The end index for .iloc is exclusive, so it can be at most len(df).
             end_index = min(len(original_df), end_index)
 
-            # Handle checkpoint resumption
+            # Handle checkpoint resumption. self.start_from_row is the 1-based Excel row to start FROM.
             current_run_start_index = self.start_from_row - 2
             current_run_start_index = max(start_index, current_run_start_index)
 
-            df_to_process = original_df.iloc[current_run_start_index:end_index]
+            # Final check to prevent invalid slices
+            if current_run_start_index >= end_index:
+                df_to_process = pd.DataFrame() # Process nothing if the range is invalid or already complete.
+                self.logger.warning(f"Skipping processing: The start index ({current_run_start_index}) is not before the end index ({end_index}). This may be due to resuming a completed job.")
+            else:
+                df_to_process = original_df.iloc[current_run_start_index:end_index]
 
             total_rows_for_job = (thread_settings.end_row - thread_settings.start_row) + 1
-
             self.status_callback(len(self.processed_records), total_rows_for_job, "Processing...")
 
             for i, row in df_to_process.iterrows():
@@ -167,11 +176,10 @@ class JobManager:
                     processed_record = self.processing_engine.process_record(record)
                 except Exception as row_error:
                     self.logger.error(f"Failed to process row {int(i) + 2}. Error: {row_error}", exc_info=True)
-                    # Create a "failed" record to preserve original data and mark the error
                     processed_record = self._create_record_from_row(row, thread_settings.column_mapping)
                     processed_record.remarks = f"FATAL_ERROR: {row_error}"
-                    processed_record.evidence = f"The row could not be processed after multiple retries. Final error: {row_error}"
-                    processed_record.cleaned_merchant_name = "" # Ensure cleaned fields are blank on failure
+                    processed_record.evidence = f"The row could not be processed. Final error: {row_error}"
+                    processed_record.cleaned_merchant_name = ""
 
                 with self._lock:
                     self.processed_records.append(processed_record)
@@ -184,16 +192,14 @@ class JobManager:
 
             if self._is_stopped:
                 if self.processed_records:
-                    self._write_output_file(original_df)
+                    self._write_output_file(original_df, thread_settings)
                 self.logger.info("Job stopped by user. Partial results saved.")
                 self.completion_callback("Job Stopped")
             else:
-                self._write_output_file(original_df)
+                self._write_output_file(original_df, thread_settings)
                 self._cleanup_checkpoint()
                 self.logger.info("Main data processing completed successfully.")
                 self.completion_callback("Job Completed Successfully")
-
-                # Start logo scraping in a separate thread
                 self._start_logo_scraping()
 
         except Exception as e:
@@ -252,36 +258,56 @@ class JobManager:
             self.logger.error(f"Could not load checkpoint file. Starting from scratch. Error: {e}")
             self._cleanup_checkpoint()
 
-    def _write_output_file(self, original_df: pd.DataFrame):
+    def _write_output_file(self, original_df: pd.DataFrame, thread_settings: JobSettings):
         """
-        Writes the final results to an Excel file, creating a new file containing
-        only the processed rows from the user-selected range.
+        Writes the final results to an Excel file. It preserves the original file's
+        contents and structure, updating only the rows within the selected range
+        that were processed in the current job.
         """
         with self._lock:
             if not self.processed_records:
                 self.logger.warning("No records were processed, output file will not be written.")
                 return
 
+            self.logger.info(f"Preparing to write {len(self.processed_records)} processed records to output file.")
+
+            # This is the DataFrame with the new, processed data
             processed_df = pd.DataFrame([asdict(r) for r in self.processed_records])
 
-            # Determine the exact slice of the original dataframe that was processed
-            start_index = self.start_from_row - 2
-            end_index = start_index + len(self.processed_records)
+            # Create a full copy of the original dataframe to modify. This is the foundation
+            # of the output file, ensuring all non-processed rows are preserved.
+            output_df = original_df.copy()
 
-            # Take the correct slice of the original data
-            output_df = original_df.iloc[start_index:end_index].reset_index(drop=True)
+            # Determine the starting index for the update. This must account for both the
+            # user's selected range and any checkpoint resumption.
+            # We use the thread_settings here to get the original range selected by the user for this job.
+            start_row_from_settings = thread_settings.start_row
+            # self.start_from_row is the row we actually started on (could be from a checkpoint).
+            actual_start_row = max(start_row_from_settings, self.start_from_row)
+            update_start_index = actual_start_row - 2
+            update_end_index = update_start_index + len(self.processed_records)
 
-            # Update the slice with the processed data, ensuring column alignment
+            self.logger.info(f"Updating output file from index {update_start_index} to {update_end_index-1}.")
+
+            # Update the columns in the output_df slice.
             for col_config in self.settings.output_columns:
                 if col_config.enabled and col_config.source_field in processed_df.columns:
-                    # Use .values to avoid index misalignment issues
-                    output_df[col_config.output_header] = processed_df[col_config.source_field].values
+                    # Ensure the target column exists in the output DataFrame before updating.
+                    if col_config.output_header not in output_df.columns:
+                        # Initialize with a default value that matches the source dtype if possible
+                        output_df[col_config.output_header] = pd.Series(dtype=processed_df[col_config.source_field].dtype)
+
+                    # Use .loc to update the specific slice. The indices of the slice must align
+                    # with the indices of the source data. Using .values is crucial here as it
+                    # ignores the index of the source (processed_df), preventing alignment errors.
+                    output_df.loc[update_start_index:update_end_index-1, col_config.output_header] = processed_df[col_config.source_field].values
 
         try:
-            # Fill any potential NaN values from the merge with empty strings for clean output
+            # Fill any remaining NaN values from the merge with empty strings for a clean output
+            # This is especially important for newly added columns outside the processed range.
             output_df.fillna('', inplace=True)
             output_df.to_excel(self.settings.output_filepath, index=False)
-            self.logger.info(f"Successfully wrote {len(output_df)} processed rows to {self.settings.output_filepath}")
+            self.logger.info(f"Successfully wrote {len(output_df)} total rows to {self.settings.output_filepath}")
         except (IOError, PermissionError) as e:
             raise IOError(f"Could not write to output file '{self.settings.output_filepath}'. Check permissions. Original error: {e}")
 
