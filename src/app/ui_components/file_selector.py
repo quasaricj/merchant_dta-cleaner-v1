@@ -12,7 +12,10 @@ class FileSelector(tk.Frame):
 
     def __init__(self, parent, on_file_select: Callable[[str], None],
                  on_output_select: Callable[[str], None], *args, **kwargs):
+        # Pop the custom kwarg before calling the parent constructor
+        self.require_output = kwargs.pop('require_output', True)
         super().__init__(parent, *args, **kwargs)
+
         self.on_file_select = on_file_select
         self.on_output_select = on_output_select
 
@@ -32,12 +35,13 @@ class FileSelector(tk.Frame):
         self.browse_button = ttk.Button(self, text="Browse...", command=self.browse_input_file)
         self.browse_button.grid(row=1, column=1, padx=5, pady=2)
 
-        # --- Output File Selection ---
-        ttk.Label(self, text="Output Excel File:", font=("Arial", 10, "bold")).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(10,0))
-        self.output_entry = ttk.Entry(self, textvariable=self.output_filepath, width=60, state="readonly")
-        self.output_entry.grid(row=3, column=0, padx=5, pady=2, sticky="ew")
-        self.output_browse_button = ttk.Button(self, text="Save As...", command=self.browse_output_file)
-        self.output_browse_button.grid(row=3, column=1, padx=5, pady=2)
+        # --- Output File Selection (conditional) ---
+        if self.require_output:
+            ttk.Label(self, text="Output Excel File:", font=("Arial", 10, "bold")).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(10,0))
+            self.output_entry = ttk.Entry(self, textvariable=self.output_filepath, width=60, state="readonly")
+            self.output_entry.grid(row=3, column=0, padx=5, pady=2, sticky="ew")
+            self.output_browse_button = ttk.Button(self, text="Save As...", command=self.browse_output_file)
+            self.output_browse_button.grid(row=3, column=1, padx=5, pady=2)
 
     def browse_input_file(self):
         """Opens a file dialog to select an input Excel file."""
@@ -79,8 +83,13 @@ class FileSelector(tk.Frame):
         """Allows the main window to set the output path externally if needed."""
         self.output_filepath.set(path)
 
+    def get_filepath(self):
+        """Returns the selected input file path."""
+        return self.input_filepath.get()
+
     def toggle_controls(self, enabled: bool):
         """Disables or enables the browse buttons."""
         state = "normal" if enabled else "disabled"
         self.browse_button.config(state=state)
-        self.output_browse_button.config(state=state)
+        if hasattr(self, 'output_browse_button'):
+            self.output_browse_button.config(state=state)
